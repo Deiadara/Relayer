@@ -5,8 +5,7 @@ use dotenv::dotenv;
 use std::env;
 
 use alloy::{
-    primitives::{keccak256, Address},
-    rpc::types::eth::BlockNumberOrTag
+    consensus::Receipts, primitives::{keccak256, Address}, rpc::types::eth::BlockNumberOrTag
 };
 use eyre::Result;
 use serde_json::Value;
@@ -56,7 +55,17 @@ async fn main() -> Result<()> {
         save_block = deposits_tuple.1;
 
         for dep in deposits {
-            let _ = includer::mint(&rpc_url_dst, dep.amount, dst_bytecode, dst_abi).await;
+            match includer::mint(&rpc_url_dst, dep.amount, dst_bytecode, dst_abi).await {
+                Ok(Some(receipt)) => {
+                    println!("Transaction successful! Receipt: {:?}", receipt);
+                }
+                Ok(None) => {
+                    println!("Transaction sent, but no receipt found yet.");
+                }
+                Err(e) => {
+                    eprintln!("Minting failed: {:?}", e);
+                }
+            }
         }
 
         let two_sec = time::Duration::from_millis(2000);

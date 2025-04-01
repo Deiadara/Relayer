@@ -1,18 +1,18 @@
 use std::{str,fs};
 
 use alloy::{
-    network::{TransactionBuilder,Network}, 
-    primitives::{hex,Bytes,Address}, 
+    contract::{ContractInstance, Interface}, 
+    dyn_abi::DynSolValue, 
+    network::{Network, TransactionBuilder}, 
+    primitives::{hex, Address, Bytes}, 
     providers::{Provider, ProviderBuilder}, 
-    rpc::types::{TransactionRequest,eth},
-    contract::{ContractInstance, Interface},
-    dyn_abi::DynSolValue
+    rpc::types::{eth, TransactionReceipt, TransactionRequest}
 };
 use eyre::Result;
 use serde_json::Value;
 
 
-pub async fn mint(rpc_url : &alloy::transports::http::reqwest::Url, amount : i32, bytecode_str : &str, dst_abi : &Value) -> Result<i32> {
+pub async fn mint(rpc_url : &alloy::transports::http::reqwest::Url, amount : i32, bytecode_str : &str, dst_abi : &Value) -> Result<Option<TransactionReceipt>> {
     println!("New deposit of amount {}",amount);
 
     let provider = ProviderBuilder::new().on_http(rpc_url.clone());
@@ -32,11 +32,9 @@ pub async fn mint(rpc_url : &alloy::transports::http::reqwest::Url, amount : i32
     let number_value = DynSolValue::from(String::from(str_amount));
     
     let contract = ContractInstance::new(contract_address, provider.clone(), Interface::new(abi));
-    let pending_transaction = contract.function("mint", &[number_value])?.send().await?;
-    println!("pending : {:?}", pending_transaction);
-    let tx_hash = pending_transaction.watch().await?;
+    let tx_hash = contract.function("mint", &[number_value])?.send().await?.watch().await?;
     println!("tx_hash: {tx_hash}");
     let receipt = provider.get_transaction_receipt(tx_hash).await?;
     println!("receipt: {:?}",receipt);
-    Ok(32)
+    Ok(receipt)
 }
