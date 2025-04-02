@@ -21,12 +21,10 @@ async fn main() -> Result<()> {
     let data_str = fs::read_to_string(token_data_path)?;
     let data_json: Value = serde_json::from_str(&data_str)?;
     let dst_abi = &data_json["abi"];
-    println!("Loaded token_abi: {:?}", dst_abi);
 
-    let dst_bytecode = data_json["evm"]["bytecode"]["object"]
-    .as_str()
-    .expect("Bytecode not found");
-    println!("Loaded dst_bytecode: {:?}", dst_bytecode);
+    // let dst_bytecode = data_json["evm"]["bytecode"]["object"]
+    // .as_str()
+    // .expect("Bytecode not found");
 
     let address_path = "../project_eth/data/deployments.json";
     let address_str = fs::read_to_string(address_path)?;
@@ -47,8 +45,8 @@ async fn main() -> Result<()> {
         let deposits_tuple = subscriber::get_deposits(&rpc_url, event_sig, contract_address, save_block).await?;
         let deposits = deposits_tuple.0;
         save_block = deposits_tuple.1;
-
         for dep in deposits {
+            println!("Event emitted from sender : {:?}", dep.sender);
             match includer::mint(&rpc_url_dst, dep.amount, dst_abi).await {
                 Ok(Some(receipt)) => {
                     println!("Transaction successful! Receipt: {:?}", receipt);

@@ -48,8 +48,6 @@ pub async fn get_deposits(rpc_url: &alloy::transports::http::reqwest::Url , even
             _ => return Err(eyre::eyre!("Expected address in topic")),
         };
 
-        println!("Sender address: {:?}", sender);
-
         let raw_data = log.data().data.clone();
 
         let decoded = DynSolType::String.abi_decode(&raw_data.clone())?;
