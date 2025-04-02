@@ -3,17 +3,11 @@ mod includer;
 use std::{fs,thread, time};
 use dotenv::dotenv;
 use std::env;
-
 use alloy::{
-    consensus::Receipts, primitives::{keccak256, Address}, rpc::types::eth::BlockNumberOrTag
+    primitives::{keccak256, Address}, rpc::types::eth::BlockNumberOrTag
 };
 use eyre::Result;
 use serde_json::Value;
-// use alloy_dyn_abi::{DynSolType, DynSolValue};
-
-// do it with library
-
-
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -55,9 +49,28 @@ async fn main() -> Result<()> {
         save_block = deposits_tuple.1;
 
         for dep in deposits {
-            match includer::mint(&rpc_url_dst, dep.amount, dst_bytecode, dst_abi).await {
+            match includer::mint(&rpc_url_dst, dep.amount, dst_abi).await {
                 Ok(Some(receipt)) => {
                     println!("Transaction successful! Receipt: {:?}", receipt);
+                    // Receipt's logs : https://www.quicknode.com/docs/ethereum/eth_getTransactionReceipt
+                    if let Some(first_log) = receipt.logs().get(0) {
+                        if let Some(event_hash) = first_log.topics().get(0) {
+                            println!("Event signature hash (topic[0]): {:?}", event_hash);
+                            let sig = keccak256("Minted(address,string)");
+                            println!("{:?}", sig);
+                            if sig == event_hash.clone() {
+                                println!("Comparisson successful : Tokens were minted");
+                            }
+                            else {
+                                println!("Hashes were not the same");
+                            }
+                        } else {
+                            println!("No topics in first log.");
+                        }
+                    }
+                    else {
+                        println!("No logs found in the receipt.");
+                    }
                 }
                 Ok(None) => {
                     println!("Transaction sent, but no receipt found yet.");
@@ -70,13 +83,5 @@ async fn main() -> Result<()> {
 
         let two_sec = time::Duration::from_millis(2000);
         thread::sleep(two_sec);
-
-        //provider.get_transaction_receipt(hash)
-        // check result's logs https://www.quicknode.com/docs/ethereum/eth_getTransactionReceipt
-
     }
 }
-
-
-// check if alloy can call contracts on other end
-// provider (eth rpc) can check with the tx hash of the tx of the emitted event, check that the logs contain the Mint(...)

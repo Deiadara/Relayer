@@ -1,8 +1,6 @@
 use eyre::Result;
-use std::{convert::TryInto,str};
-
 use alloy::{
-    primitives::{Address, Bytes, FixedBytes, B256},
+    primitives::{Address, FixedBytes, B256},
     providers::{Provider, ProviderBuilder},
     rpc::types::{eth::BlockNumberOrTag, Filter},
     dyn_abi::{DynSolType, DynSolValue}
@@ -39,7 +37,6 @@ pub async fn get_deposits(rpc_url: &alloy::transports::http::reqwest::Url , even
 
     for log in logs {
         println!("Transfer event: {log:?}");
-        // extract address and amount
         let topics = log.topics();
         let raw_topic = topics.get(1).expect("Expected at least 2 topics");
 
