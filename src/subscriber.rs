@@ -1,11 +1,12 @@
-use eyre::Result;
 use alloy::{
-    primitives::{Address, B256,keccak256,},
-    providers::{Provider, ProviderBuilder},
-    rpc::types::{eth::BlockNumberOrTag, Filter},
-    dyn_abi::{DynSolType, DynSolValue}
+    dyn_abi::{DynSolType, DynSolValue}, primitives::{keccak256, Address, FixedBytes, B256}, providers::{
+        fillers::{BlobGasFiller,ChainIdFiller,FillProvider,GasFiller,JoinFill,NonceFiller}, Identity, Provider, ProviderBuilder, RootProvider
+    }, rpc::types::Filter
 };
 
+use eyre::Result;
+
+type ProviderType = FillProvider<JoinFill<Identity,JoinFill<GasFiller,JoinFill<BlobGasFiller,JoinFill<NonceFiller, ChainIdFiller>>>>,RootProvider>;
 
 #[derive(Debug)]
 pub struct Deposit {
@@ -14,35 +15,34 @@ pub struct Deposit {
 }
 
 pub struct Subscriber {
-    rpc_url : alloy::transports::http::reqwest::Url,
-    contract_address : Address
+    contract_address : Address,
+    provider : ProviderType,
+    event_sig : FixedBytes<32>
 }
 
 impl Subscriber {
     pub fn new(rpc_url: &alloy::transports::http::reqwest::Url ,contract_address : Address) -> Self {
+
+        let event_sig = keccak256("Deposited(address,string)");
+        let provider: ProviderType = ProviderBuilder::new().on_http(rpc_url.clone());
+
         Self {
-            rpc_url: rpc_url.clone(),
-            contract_address
+            contract_address,
+            provider,
+            event_sig
         }
     }
 
-    pub async fn get_deposits(&self, from_block : BlockNumberOrTag) -> Result<(Vec<Deposit>,BlockNumberOrTag)> {
+    pub async fn get_deposits(&self, from_block : u64) -> Result<(Vec<Deposit>,u64)> {    
 
-        let event_sig = keccak256("Deposited(address,string)");
-    
         let mut deposits = Vec::new();
+        let to_block = self.provider.get_block_number().await?;
+        let filter = Filter::new().address(self.contract_address).from_block(from_block + 1).to_block(to_block);   
     
-        let provider = ProviderBuilder::new().on_http(self.rpc_url.clone());
+        println!("Scanning from {} to {to_block}...", from_block+1);
+        println!("Filter topic0: {:?}", B256::from(self.event_sig));
     
-        let to_block= BlockNumberOrTag::Latest; // move to constructor and initiate redis, keep the url inside the constructor and connect to it (like provider)
-    
-        let filter = Filter::new().address(self.contract_address).from_block(from_block)
-            .to_block(to_block);   
-    
-        println!("Scanning from {from_block} to {to_block}...");
-        println!("Filter topic0: {:?}", B256::from(event_sig));
-    
-        let logs = provider.get_logs(&filter).await?;
+        let logs = self.provider.get_logs(&filter).await?;
     
         println!("Got {} logs", logs.len());
     
@@ -71,7 +71,7 @@ impl Subscriber {
             let amount = amount_str.parse::<i32>().unwrap();
     
             deposits.push(Deposit { sender, amount });
-    
+
             }
         Ok((deposits,to_block))
         
