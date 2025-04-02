@@ -1,9 +1,9 @@
+use crate::errors::RelayerError;
 use alloy::{
     dyn_abi::{DynSolType, DynSolValue}, primitives::{keccak256, Address, FixedBytes, B256}, providers::{
-        fillers::{BlobGasFiller,ChainIdFiller,FillProvider,GasFiller,JoinFill,NonceFiller}, Identity, Provider, ProviderBuilder, RootProvider
+    fillers::{BlobGasFiller,ChainIdFiller,FillProvider,GasFiller,JoinFill,NonceFiller}, Identity, Provider, ProviderBuilder, RootProvider
     }, rpc::types::Filter
 };
-
 use eyre::Result;
 
 type ProviderType = FillProvider<JoinFill<Identity,JoinFill<GasFiller,JoinFill<BlobGasFiller,JoinFill<NonceFiller, ChainIdFiller>>>>,RootProvider>;
@@ -33,16 +33,16 @@ impl Subscriber {
         }
     }
 
-    pub async fn get_deposits(&self, from_block : u64) -> Result<(Vec<Deposit>,u64)> {    
+    pub async fn get_deposits(&self, from_block : u64) -> Result<(Vec<Deposit>,u64),RelayerError> {    
 
         let mut deposits = Vec::new();
-        let to_block = self.provider.get_block_number().await?;
+        let to_block = self.provider.get_block_number().await.map_err(|e| RelayerError::Provider(e.to_string()))?;
         let filter = Filter::new().address(self.contract_address).from_block(from_block + 1).to_block(to_block);   
     
         println!("Scanning from {} to {to_block}...", from_block+1);
         println!("Filter topic0: {:?}", B256::from(self.event_sig));
     
-        let logs = self.provider.get_logs(&filter).await?;
+        let logs = self.provider.get_logs(&filter).await.map_err(|e| RelayerError::Provider(e.to_string()))?;
     
         println!("Got {} logs", logs.len());
     
@@ -56,7 +56,7 @@ impl Subscriber {
             let decoded = DynSolType::Address.abi_decode(topic_bytes)?;
             let sender = match decoded {
                 DynSolValue::Address(addr) => addr,
-                _ => return Err(eyre::eyre!("Expected address in topic")),
+                _ => return Err(RelayerError::NoAddress),
             };
     
             let raw_data = log.data().data.clone();
@@ -65,12 +65,12 @@ impl Subscriber {
     
             let amount_str = match decoded {
                 DynSolValue::String(s) => s,
-                _ => return Err(eyre::eyre!("Expected string in event data")),
+                _ => return Err(RelayerError::NotString),
             };
     
             let amount = amount_str.parse::<i32>().unwrap();
     
-            deposits.push(Deposit { sender, amount });
+            deposits.push(Deposit{sender, amount});
 
             }
         Ok((deposits,to_block))

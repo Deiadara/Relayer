@@ -11,7 +11,16 @@ pub enum RelayerError {
     #[error("No topics found.")]
     NoTopics,
 
-    #[error("No receipt found")]
-    NoReceipt
+    #[error("No address found in topics.")]
+    NoAddress,
+
+    #[error("Data is not string")]
+    NotString,
+
+    #[error(transparent)]
+    AbiError(#[from] alloy::dyn_abi::Error),
+
+    #[error("Provider call failed: {0}")]
+    Provider(String),
 }
 
