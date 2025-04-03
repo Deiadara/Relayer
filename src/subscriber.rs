@@ -26,7 +26,6 @@ pub struct Subscriber {
 impl Subscriber {
     pub async fn new(rpc_url: &alloy::transports::http::reqwest::Url ,contract_address : Address) -> Result<Self> {
 
-
         let client = Client::open("redis://127.0.0.1/")?;
         let con = client.get_multiplexed_async_connection().await?;
 
@@ -44,7 +43,7 @@ impl Subscriber {
     pub async fn get_deposits(&self) -> Result<Vec<Deposit>,RelayerError> {
 
         let mut from_block : u64 = 0;
-        let from_block_response: Option<u64> = self.con.clone().get("from_block").await.map_err(|e| RelayerError::RadisError(e.to_string()))?;
+        let from_block_response: Option<u64> = self.con.clone().get("from_block").await.map_err(|e| RelayerError::RedisError(e.to_string()))?;
         if from_block_response.is_some() {
             from_block = from_block_response.unwrap();
         }
@@ -87,7 +86,7 @@ impl Subscriber {
 
             }
 
-        let response: String = self.con.clone().set("from_block", to_block).await.map_err(|e| RelayerError::RadisError(e.to_string()))?;
+        let response: String = self.con.clone().set("from_block", to_block).await.map_err(|e| RelayerError::RedisError(e.to_string()))?;
         println!("Response: {}", response);
         Ok(deposits)
         

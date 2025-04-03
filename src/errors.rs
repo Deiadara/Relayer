@@ -23,7 +23,7 @@ pub enum RelayerError {
     #[error("Provider call failed: {0}")]
     ProviderError(String),
 
-    #[error("Radis call failed: {0}")]
-    RadisError(String),
+    #[error("Redis call failed: {0}")]
+    RedisError(String),
 }
 
