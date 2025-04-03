@@ -12,6 +12,7 @@ use eyre::Result;
 use serde_json::Value;
 type ProviderType = FillProvider<JoinFill<JoinFill<Identity, JoinFill<GasFiller, JoinFill<BlobGasFiller, JoinFill<NonceFiller, alloy::providers::fillers::ChainIdFiller>>>>, alloy::providers::fillers::WalletFiller<EthereumWallet>>, alloy::providers::RootProvider>;
 type ContractType = ContractInstance<ProviderType, Ethereum>;
+
 pub struct Includer {
     provider : ProviderType,
     contract : ContractType
@@ -19,6 +20,7 @@ pub struct Includer {
 
 impl Includer {
     pub fn new(dst_rpc_url: &alloy::transports::http::reqwest::Url ,contract_address : Address) -> Result<Self> {
+        
         
         let token_data_path = "../project_eth/data/TokenData.json";
         let data_str = fs::read_to_string(token_data_path)?;

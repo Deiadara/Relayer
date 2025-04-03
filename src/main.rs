@@ -8,7 +8,6 @@ use std::env;
 use alloy::primitives::Address;
 use eyre::Result;
 use serde_json::Value;
-
 #[tokio::main]
 async fn main() -> Result<()> {
 
@@ -32,15 +31,11 @@ async fn main() -> Result<()> {
     let rpc_url:alloy::transports::http::reqwest::Url  = src_rpc.parse()?;
     let rpc_url_dst: alloy::transports::http::reqwest::Url = dst_rpc.parse()?;
 
-    let mut from_block = 0; // read from redis key value store, if doesnt exist start from zero
-
-    let sub = subscriber::Subscriber::new(&rpc_url, contract_address);
+    let sub = subscriber::Subscriber::new(&rpc_url, contract_address).await.unwrap();
     let incl = includer::Includer::new(&rpc_url_dst, dst_contract_address).unwrap();
 
     loop {
-        let deposits_tuple = sub.get_deposits(from_block).await?;
-        let deposits = deposits_tuple.0;
-        from_block = deposits_tuple.1;
+        let deposits = sub.get_deposits().await?;
         for dep in deposits {
             println!("Event emitted from sender : {:?}", dep.sender);
             match incl.mint(dep.amount).await {
@@ -63,4 +58,3 @@ async fn main() -> Result<()> {
     }
 }
 // read redis (Non Relational Database chapter) and when relayer goes down, keep last block checked so that when restarted it can start from there
-// add redis to gitbook

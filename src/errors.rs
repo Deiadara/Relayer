@@ -21,6 +21,9 @@ pub enum RelayerError {
     AbiError(#[from] alloy::dyn_abi::Error),
 
     #[error("Provider call failed: {0}")]
-    Provider(String),
+    ProviderError(String),
+
+    #[error("Radis call failed: {0}")]
+    RadisError(String),
 }
 
