@@ -2,12 +2,16 @@ mod subscriber;
 mod includer;
 mod utils;
 mod errors;
-use std::{fs,thread, time};
+use std::{fs,thread, time, env};
 use dotenv::dotenv;
-use std::env;
-use alloy::primitives::Address;
+use alloy::{primitives::Address,
+    transports::http::reqwest::Url};
 use eyre::Result;
 use serde_json::Value;
+use utils::log_to_deposit;
+
+const ADDRESS_PATH : &str = "../project_eth/data/deployments.json";
+
 #[tokio::main]
 async fn main() -> Result<()> {
 
@@ -16,8 +20,7 @@ async fn main() -> Result<()> {
     let src_rpc = env::var("SRC_RPC").expect("SRC_RPC not set");
     let dst_rpc = env::var("DST_RPC").expect("DST_RPC not set");
 
-    let address_path = "../project_eth/data/deployments.json";
-    let address_str = fs::read_to_string(address_path)?;
+    let address_str = fs::read_to_string(ADDRESS_PATH)?;
     let json: Value = serde_json::from_str(&address_str)?;
 
     let contract_addr = json["Deposit"].as_str().expect("Deposit address not found");
@@ -28,33 +31,26 @@ async fn main() -> Result<()> {
 
     println!("Loaded deposit_address: {:?}", contract_address);
 
-    let rpc_url:alloy::transports::http::reqwest::Url  = src_rpc.parse()?;
-    let rpc_url_dst: alloy::transports::http::reqwest::Url = dst_rpc.parse()?;
+    let rpc_url : Url  = src_rpc.parse()?;
+    let rpc_url_dst: Url = dst_rpc.parse()?;
 
-    let sub = subscriber::Subscriber::new(&rpc_url, contract_address).await.unwrap();
+    let mut sub = subscriber::Subscriber::new(&rpc_url, contract_address).await.unwrap();
     let incl = includer::Includer::new(&rpc_url_dst, dst_contract_address).unwrap();
 
     loop {
         let deposits = sub.get_deposits().await?;
         for dep in deposits {
-            println!("Event emitted from sender : {:?}", dep.sender);
-            match incl.mint(dep.amount).await {
-                Ok(Some(receipt)) => {
-                    println!("Transaction successful! Receipt: {:?}", receipt);
-                    utils::verify_minted_log(&receipt)?;
-                }
-                Ok(None) => {
-                    println!("Transaction sent, but no receipt found.");
-                    //return Err(RelayerError::NoReceipt.into()); 
+            match log_to_deposit(dep, &incl).await {
+                Ok(_) => {
+                    println!("Successfully processed deposit");
                 }
                 Err(e) => {
-                    eprintln!("Minting failed: {:?}", e);
+                    eprintln!("Error processing deposit: {:?}", e);
                 }
             }
         }
-
+        
         let two_sec = time::Duration::from_millis(2000);
         thread::sleep(two_sec);
     }
 }
-// read redis (Non Relational Database chapter) and when relayer goes down, keep last block checked so that when restarted it can start from there

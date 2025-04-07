@@ -25,5 +25,8 @@ pub enum RelayerError {
 
     #[error("Redis call failed: {0}")]
     RedisError(String),
+
+    #[error("Unhandled error: {0}")]
+    Other(String)
 }
 
