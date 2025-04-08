@@ -2,6 +2,7 @@ mod subscriber;
 mod includer;
 mod utils;
 mod errors;
+mod queue;
 use std::{fs,thread, time, env};
 use dotenv::dotenv;
 use alloy::{primitives::Address,
@@ -36,6 +37,24 @@ async fn main() -> Result<()> {
 
     let mut sub = subscriber::Subscriber::new(&rpc_url, contract_address).await.unwrap();
     let incl = includer::Includer::new(&rpc_url_dst, dst_contract_address).unwrap();
+
+    match  queue::test_queue_send().await {
+        Ok(_) => {
+            println!("Successfully sent");
+        }
+        Err(e) => {
+            eprintln!("Error processing sent: {:?}", e);
+        }
+    }
+
+    match queue::test_queue_receive().await {
+        Ok(_) => {
+            println!("Successfully received");
+        }
+        Err(e) => {
+            eprintln!("Error processing receive: {:?}", e);
+        }
+    }
 
     loop {
         let deposits = sub.get_deposits().await?;

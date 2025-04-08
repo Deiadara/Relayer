@@ -16,3 +16,4 @@ thiserror = "2.0.12"
 redis = {version = "0.25", features = ["aio", "tokio-comp"]}
 tokio = { version = "1.44.1", features = ["full"] }
 rabbitmq-stream-client = "0.8.0"
+tokio-stream = "0.1.17"

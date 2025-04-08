@@ -1,4 +1,5 @@
 use crate::errors::RelayerError;
+use crate::queue;
 use alloy::{
     transports::http::reqwest::Url,
     dyn_abi::{DynSolType, DynSolValue}, primitives::{keccak256, Address, FixedBytes, B256}, providers::{
@@ -47,6 +48,15 @@ impl Subscriber {
     }
 
     pub async fn get_deposits(&mut self) -> Result<Vec<Deposit>,RelayerError> {
+
+        match queue::test_queue_send().await {
+            Ok(_) => {
+                println!("Successfully sent");
+            }
+            Err(e) => {
+                eprintln!("Error processing sent: {:?}", e);
+            }
+        }
 
         let mut from_block : u64 = 0;
         let from_block_response: Option<u64> = self.con.get("from_block")
@@ -110,7 +120,6 @@ impl Subscriber {
 }
 
 //todo :
-// clippy
 // tracing library 
 // try to make contract throw error and check receipt and logs if they exist
 
@@ -120,7 +129,7 @@ impl Subscriber {
 
 // make deposit_to_log it testable
 
-// incuder : mock contract and provider and see that they re called with the correct arguments
+// includer : mock contract and provider and see that they re called with the correct arguments
 
 // src/bin can have many "main" binaries, make different for subscriber and includer, deprecate main
 

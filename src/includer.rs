@@ -1,4 +1,5 @@
 use std::{fs,env};
+use crate::queue;
 use alloy::{
     json_abi::JsonAbi,
     transports::http::reqwest::Url,
@@ -25,7 +26,6 @@ const TOKEN_DATA_PATH : &str = "../project_eth/data/TokenData.json";
 impl Includer {
     pub fn new(dst_rpc_url: &Url ,contract_address : Address) -> Result<Self> {
         
-        
         let data_str = fs::read_to_string(TOKEN_DATA_PATH)?;
         let data_json: Value = serde_json::from_str(&data_str)?;
         let abi : JsonAbi = serde_json::from_str(&data_json["abi"].to_string())?;
@@ -42,6 +42,15 @@ impl Includer {
     }
 
     pub async fn mint(&self, amount : i32) -> Result<Option<TransactionReceipt>> {
+
+        match queue::test_queue_receive().await {
+            Ok(_) => {
+                println!("Successfully received");
+            }
+            Err(e) => {
+                eprintln!("Error processing receive: {:?}", e);
+            }
+        }
 
         println!("New deposit of amount {}",amount);
         let str_amount = amount.to_string();
