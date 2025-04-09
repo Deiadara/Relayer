@@ -1,90 +1,142 @@
+use alloy::consensus;
+use redis::RedisError;
+use std::env;
 use rabbitmq_stream_client::error::StreamCreateError;
 use rabbitmq_stream_client::types::{ByteCapacity, Message, ResponseCode};
-use rabbitmq_stream_client::Environment;
-use std::io::stdin;
+use rabbitmq_stream_client::{Consumer, Producer,Environment, NoDedup};
 use rabbitmq_stream_client::types::OffsetSpecification;
 use tokio_stream::StreamExt;
 use tokio::task;
-
-
+use serde::{Serialize, Deserialize};
+use serde_json;
+use crate::subscriber::Deposit;
 use crate::errors::RelayerError;
+use futures::future;
+use redis::{aio::MultiplexedConnection, AsyncCommands, Client};
+use dotenv;
 
 
-pub async fn test_queue_send() -> Result<(),RelayerError>{
+const STREAM : &str = "relayer-stream-x";
 
-    let environment = Environment::builder().build().await.map_err(|e| RelayerError::QueueClientError(e))?;
-    let stream = "hello-rust-stream";
-    let create_response = environment
-        .stream_creator()
-        .max_length(ByteCapacity::GB(5))
-        .create(stream)
-        .await;
-
-    if let Err(e) = create_response {
-        if let StreamCreateError::Create { stream, status } = e {
-            match status {
-                // we can ignore this error because the stream already exists
-                ResponseCode::StreamAlreadyExists => {}
-                err => {
-                    println!("Error creating stream: {:?} {:?}", stream, err);
-                }
-            }
-        }
-    }
-    let producer = environment.producer().build(stream).await.map_err(|e| RelayerError::QueueProducerCreateError(e))?;
-    producer
-        .send_with_confirm(Message::builder().body("Hello, World!").build())
-        .await
-        .map_err(|e| RelayerError::QueueProducerPublishError(e))?;
-
-    Ok(())
+pub struct QueueConnectionWriter {
+    pub environment: Environment,
+    pub stream: String,
+    pub producer: Producer<NoDedup>,
 }
 
-pub async fn test_queue_receive() -> Result<(),RelayerError>{
-    use rabbitmq_stream_client::Environment;
-    let environment = Environment::builder().build().await.map_err(|e| RelayerError::QueueClientError(e))?;
-    let stream = "hello-rust-stream";
-    let create_response = environment
-        .stream_creator()
-        .max_length(ByteCapacity::GB(5))
-        .create(stream)
-        .await;
+pub struct QueueConnectionConsumer {
+    pub environment: Environment,
+    pub stream: String,
+    pub consumer: Consumer,
+    pub dbcon : MultiplexedConnection,
+    pub offset : u64
+}
 
-    if let Err(e) = create_response {
-        if let StreamCreateError::Create { stream, status } = e {
-            match status {
-                // we can ignore this error because the stream already exists
-                ResponseCode::StreamAlreadyExists => {}
-                err => {
-                    println!("Error creating stream: {:?} {:?}", stream, err);
+impl QueueConnectionWriter {
+    pub async fn new() -> Result<Self, RelayerError> {
+
+        let environment = Environment::builder()
+            .build()
+            .await
+            .map_err(|e| RelayerError::QueueClientError(e))?;
+        let stream = String::from(STREAM);
+        
+        let create_response = environment
+            .stream_creator()
+            .max_length(ByteCapacity::GB(5))
+            .create(&stream)
+            .await;
+        
+        if let Err(e) = create_response {
+            if let StreamCreateError::Create { stream: _, status } = e {
+                match status {
+                    ResponseCode::StreamAlreadyExists => {},
+                    err => {
+                        println!("Error creating stream: {:?} {:?}", stream, err);
+                    }
                 }
             }
         }
+        
+        let producer: Producer<NoDedup> = environment
+            .producer()
+            .build(&stream)
+            .await
+            .map_err(|e| RelayerError::QueueProducerCreateError(e))?;
+        
+        Ok(Self {
+            environment,
+            stream,
+            producer
+        })
     }
+}
 
-    let mut consumer = environment
-        .consumer()
-        .offset(OffsetSpecification::First)
-        .build(stream)
-        .await
-        .unwrap();
 
-    let handle = consumer.handle();
-    task::spawn(async move {
-        while let Some(delivery) = consumer.next().await {
-            let d = delivery.unwrap();
-            println!("Got message: {:#?} with offset: {}",
-                     d.message().data().map(|data| String::from_utf8(data.to_vec()).unwrap()),
-                     d.offset(),);
+impl QueueConnectionConsumer {
+    pub async fn new() -> Result<Self, RelayerError> {
+        
+        let db_url = env::var("DB_URL").expect("DB_URL not set");
+
+        let client = Client::open(db_url).map_err(|e| RelayerError::RedisError(e.to_string()))?;
+        let mut dbcon = client.get_multiplexed_async_connection().await.map_err(|e| RelayerError::RedisError(e.to_string()))?;
+
+        let offset: u64 = dbcon
+            .get("last_offset")
+            .await
+            .unwrap_or(0);
+
+        let offset_spec = OffsetSpecification::Offset(offset);
+
+        println!("Starting from offset: {}", offset);
+
+        let environment = Environment::builder()
+            .build()
+            .await
+            .map_err(|e| RelayerError::QueueClientError(e))?;
+        let stream = String::from(STREAM);
+        
+        let create_response = environment
+            .stream_creator()
+            .max_length(ByteCapacity::GB(5))
+            .create(&stream)
+            .await;
+
+        
+        if let Err(e) = create_response {
+            if let StreamCreateError::Create { stream: _, status } = e {
+                match status {
+                    ResponseCode::StreamAlreadyExists => {},
+                    err => {
+                        println!("Error creating stream: {:?} {:?}", stream, err);
+                    }
+                }
+            }
         }
-    });
+        
+        let consumer: Consumer = environment
+            .consumer()
+            .offset(offset_spec)
+            .build(&stream)
+            .await
+            .map_err(|e| RelayerError::QueueConsumerCreateError(e))?;
+        
+        Ok(Self {
+            environment,
+            stream,
+            consumer,
+            dbcon,
+            offset
+        })
+    }
+}
 
+pub async fn get_queue_connection_writer() -> Result<QueueConnectionWriter,RelayerError>{
+    let queue_connection = QueueConnectionWriter::new().await?;
+    Ok(queue_connection)
+}
 
-    println!("Press any key to close the consumer");
-     _ = stdin().read_line(&mut "".to_string());
-
-
-    handle.close().await?;
-    println!("consumer closed successfully");
-    Ok(())
+pub async fn get_queue_connection_consumer() -> Result<QueueConnectionConsumer,RelayerError>{
+    let queue_connection = QueueConnectionConsumer::new().await?;
+    Ok(queue_connection)
 }

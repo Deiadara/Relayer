@@ -43,15 +43,6 @@ impl Includer {
 
     pub async fn mint(&self, amount : i32) -> Result<Option<TransactionReceipt>> {
 
-        match queue::test_queue_receive().await {
-            Ok(_) => {
-                println!("Successfully received");
-            }
-            Err(e) => {
-                eprintln!("Error processing receive: {:?}", e);
-            }
-        }
-
         println!("New deposit of amount {}",amount);
         let str_amount = amount.to_string();
         let number_value = DynSolValue::from(str_amount.clone());

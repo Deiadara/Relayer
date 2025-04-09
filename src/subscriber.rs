@@ -6,14 +6,20 @@ use alloy::{
     fillers::{BlobGasFiller,ChainIdFiller,FillProvider,GasFiller,JoinFill,NonceFiller}, Identity, Provider, ProviderBuilder, RootProvider
     }, rpc::types::Filter
 };
-use std::env;
+use serde::{Serialize, Deserialize};
 use eyre::Result;
 use redis::{aio::MultiplexedConnection, AsyncCommands, Client};
-
+use crate::utils;
+use crate::includer::Includer;
+use std::{fs,thread, time, env};
+use dotenv::dotenv;
+use serde_json::Value;
+use utils::log_to_deposit;
 
 type ProviderType = FillProvider<JoinFill<Identity,JoinFill<GasFiller,JoinFill<BlobGasFiller,JoinFill<NonceFiller, ChainIdFiller>>>>,RootProvider>;
 
-#[derive(Debug)]
+#[derive(Serialize, Deserialize, Debug)]
+
 pub struct Deposit {
     pub sender: Address,
     pub amount: i32,
@@ -31,7 +37,7 @@ const DEPOSIT_EVENT_SIG : &str = "Deposited(address,string)";
 impl Subscriber {
     pub async fn new(rpc_url: &Url ,contract_address : Address) -> Result<Self> {
 
-        let db_url = env::var("DB_URL").expect("SRC_RPC not set");
+        let db_url = env::var("DB_URL").expect("DB_URL not set");
 
         let client = Client::open(db_url)?;
         let con = client.get_multiplexed_async_connection().await?;
@@ -48,15 +54,6 @@ impl Subscriber {
     }
 
     pub async fn get_deposits(&mut self) -> Result<Vec<Deposit>,RelayerError> {
-
-        match queue::test_queue_send().await {
-            Ok(_) => {
-                println!("Successfully sent");
-            }
-            Err(e) => {
-                eprintln!("Error processing sent: {:?}", e);
-            }
-        }
 
         let mut from_block : u64 = 0;
         let from_block_response: Option<u64> = self.con.get("from_block")
@@ -107,17 +104,19 @@ impl Subscriber {
             deposits.push(Deposit{sender, amount});
 
             }
-
+        
         let response: String = self.con
             .set("from_block", to_block)
             .await
             .map_err(|e| RelayerError::RedisError(e.to_string()))?;
         println!("Response: {}", response);
+
         Ok(deposits)
         
     }
 
 }
+
 
 //todo :
 // tracing library 
@@ -139,3 +138,4 @@ impl Subscriber {
 // sub and incl in their main will make an instance of queue. In their constructor they will have the connection
 // they will have a field C (connection) which implements the trait which implements trait queue (in queue.rs)
 // check photo for queue and redis abstraction
+

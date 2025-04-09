@@ -1,8 +1,16 @@
 use alloy::rpc::types::eth::TransactionReceipt;
 use alloy::primitives::keccak256;
-
+use rabbitmq_stream_client::error::StreamCreateError;
+use rabbitmq_stream_client::types::{ByteCapacity, Message, ResponseCode};
+use rabbitmq_stream_client::Environment;
+use rabbitmq_stream_client::types::OffsetSpecification;
 use crate::includer::Includer;
+use crate::queue::{self, QueueConnectionConsumer, QueueConnectionWriter};
 use crate::subscriber::Deposit;
+use redis::{aio::MultiplexedConnection, AsyncCommands, Client};
+use rabbitmq_stream_client::{Consumer, Producer, NoDedup};
+
+use futures::StreamExt;
 
 use crate::errors::RelayerError;
 use eyre::Result;
@@ -18,29 +26,116 @@ pub fn verify_minted_log(receipt: &TransactionReceipt) -> Result<(), RelayerErro
     if topic != &expected_hash {
         return Err(RelayerError::EventHashMismatch);
     }
-    println!("Tokens minted succesfully!");
     Ok(())
 }
 
-pub async fn log_to_deposit(dep : Deposit, incl : &Includer) -> Result<(), RelayerError>  {
-    println!("Event emitted from sender : {:?}", dep.sender);
-    match incl.mint(dep.amount).await {
-        Ok(Some(receipt)) => {
-            println!("Transaction successful! Receipt: {:?}", receipt);
-            if !receipt.status() {
-                println!("Transaction failed, status is 0");
-                Err(RelayerError::EventHashMismatch)
+pub async fn log_to_deposit(dep: Deposit, queue_connection: &QueueConnectionWriter) -> Result<(), RelayerError> {
+    println!("Event emitted from sender: {:?}", dep.sender);
+
+    let serialized_deposit = serde_json::to_vec(&dep)
+        .map_err(|e| RelayerError::SerdeError(e))?;
+    
+    queue_connection.producer
+        .send_with_confirm(Message::builder().body(serialized_deposit).build())
+        .await
+        .map_err(|e| RelayerError::QueueProducerPublishError(e))?;
+    
+    println!("Wrote in queue successfully!");
+    Ok(())
+}
+
+
+pub async fn log_to_mint(queue_connection: &mut QueueConnectionConsumer) -> Result<Deposit, RelayerError> {
+    println!("Waiting for a deposit message...");
+
+    while let Some(delivery_result) = queue_connection.consumer.next().await {
+        match delivery_result {
+            Ok(delivery) => {
+                if let Some(data_bytes) = delivery.message().data() {
+                    match serde_json::from_slice::<Deposit>(data_bytes) {
+                        Ok(deposit) => {
+                            println!("Got deposit: {:?} at offset {}", deposit, delivery.offset());
+                            let _response: String = queue_connection.dbcon
+                                .set("last_offset", delivery.offset() + 1)
+                                .await
+                                .map_err(|e| RelayerError::RedisError(e.to_string()))?;
+                            return Ok(deposit);
+                        }
+                        Err(_e) => {
+                            continue;
+                        }
+                    }
+                } else {
+                    eprintln!("No data in message");
+                }
             }
-            else {
-                verify_minted_log(&receipt)
+            Err(e) => {
+                eprintln!("Delivery error: {:?}", e);
             }
-        }
-        Ok(None) => {
-            println!("Transaction sent, but no receipt found.");
-            Err(RelayerError::EventHashMismatch)
-        }
-        Err(e) => {
-            Err(RelayerError::Other(e.to_string()))
         }
     }
+
+    Err(RelayerError::Other("Consumer stream ended unexpectedly".into()))
 }
+
+// pub async fn log_to_mint(queue_connection: &mut QueueConnectionConsumer) -> Result<Deposit, RelayerError> {
+//     println!("Waiting for a deposit message...");
+
+//     loop {
+
+//         println!("Starting from offset: {}", queue_connection.offset);
+
+//         if let Some(delivery_result) = queue_connection.consumer.next().await {
+//             match delivery_result {
+//                 Ok(delivery) => {
+//                     if let Some(data_bytes) = delivery.message().data() {
+//                         match serde_json::from_slice::<Deposit>(data_bytes) {
+//                             Ok(deposit) => {
+//                                 println!("Got deposit: {:?} at offset {}", deposit, delivery.offset());
+//                                 let _response : String = queue_connection.dbcon
+//                                     .set("last_offset", delivery.offset() + 1)
+//                                     .await
+//                                     .map_err(|e| RelayerError::RedisError(e.to_string()))?;
+//                                 return Ok(deposit);
+//                             }
+//                             Err(e) => {
+//                                 eprintln!("Failed to parse Deposit: {:?}", e);
+//                                 continue; // skip bad entries
+//                             }
+//                         }
+//                     } else {
+//                         // Message had no data; print a warning and wait for the next one.
+//                         eprintln!("Received message with no data; skipping.");
+//                     }
+//                 }
+//                 Err(e) => {
+//                     // Log delivery errors and continue waiting.
+//                     eprintln!("Delivery error: {:?}", e);
+//                 }
+//             }
+//         } else {
+//             // If the consumer stream ends unexpectedly, return an error.
+//             return Err(RelayerError::Other("Consumer stream ended unexpectedly".into()));
+//         }
+//     }
+// }
+
+// match incl.mint(dep.amount).await {
+    //     Ok(Some(receipt)) => {
+    //         println!("Transaction successful! Receipt: {:?}", receipt);
+    //         if !receipt.status() {
+    //             println!("Transaction failed, status is 0");
+    //             Err(RelayerError::EventHashMismatch)
+    //         }
+    //         else {
+    //             verify_minted_log(&receipt)
+    //         }
+    //     }
+    //     Ok(None) => {
+    //         println!("Transaction sent, but no receipt found.");
+    //         Err(RelayerError::EventHashMismatch)
+    //     }
+    //     Err(e) => {
+    //         Err(RelayerError::Other(e.to_string()))
+    //     }
+    // }
