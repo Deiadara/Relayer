@@ -1,14 +1,10 @@
 use alloy::rpc::types::eth::TransactionReceipt;
 use alloy::primitives::keccak256;
-use rabbitmq_stream_client::error::StreamCreateError;
-use rabbitmq_stream_client::types::{ByteCapacity, Message, ResponseCode};
-use rabbitmq_stream_client::Environment;
-use rabbitmq_stream_client::types::OffsetSpecification;
-use crate::includer::Includer;
-use crate::queue::{self, QueueConnectionConsumer, QueueConnectionWriter};
+use rabbitmq_stream_client::types::Message;
+
+use crate::queue::{QueueConnectionConsumer, QueueConnectionWriter};
 use crate::subscriber::Deposit;
-use redis::{aio::MultiplexedConnection, AsyncCommands, Client};
-use rabbitmq_stream_client::{Consumer, Producer, NoDedup};
+use redis::AsyncCommands;
 
 use futures::StreamExt;
 
@@ -33,12 +29,12 @@ pub async fn log_to_deposit(dep: Deposit, queue_connection: &QueueConnectionWrit
     println!("Event emitted from sender: {:?}", dep.sender);
 
     let serialized_deposit = serde_json::to_vec(&dep)
-        .map_err(|e| RelayerError::SerdeError(e))?;
+        .map_err( RelayerError::SerdeError)?;
     
     queue_connection.producer
         .send_with_confirm(Message::builder().body(serialized_deposit).build())
         .await
-        .map_err(|e| RelayerError::QueueProducerPublishError(e))?;
+        .map_err( RelayerError::QueueProducerPublishError)?;
     
     println!("Wrote in queue successfully!");
     Ok(())

@@ -1,5 +1,4 @@
 use std::{fs,env};
-use crate::queue;
 use alloy::{
     json_abi::JsonAbi,
     transports::http::reqwest::Url,

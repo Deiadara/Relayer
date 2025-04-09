@@ -1,22 +1,12 @@
-use alloy::consensus;
-use redis::RedisError;
 use std::env;
 use rabbitmq_stream_client::error::StreamCreateError;
-use rabbitmq_stream_client::types::{ByteCapacity, Message, ResponseCode};
+use rabbitmq_stream_client::types::{ByteCapacity, OffsetSpecification, ResponseCode};
 use rabbitmq_stream_client::{Consumer, Producer,Environment, NoDedup};
-use rabbitmq_stream_client::types::OffsetSpecification;
-use tokio_stream::StreamExt;
-use tokio::task;
-use serde::{Serialize, Deserialize};
-use serde_json;
-use crate::subscriber::Deposit;
 use crate::errors::RelayerError;
-use futures::future;
 use redis::{aio::MultiplexedConnection, AsyncCommands, Client};
-use dotenv;
 
 
-const STREAM : &str = "relayer-stream-x";
+const STREAM : &str = "relayer-stream-xt";
 
 pub struct QueueConnectionWriter {
     pub environment: Environment,
@@ -38,7 +28,7 @@ impl QueueConnectionWriter {
         let environment = Environment::builder()
             .build()
             .await
-            .map_err(|e| RelayerError::QueueClientError(e))?;
+            .map_err(RelayerError::QueueClientError)?;
         let stream = String::from(STREAM);
         
         let create_response = environment
@@ -47,13 +37,11 @@ impl QueueConnectionWriter {
             .create(&stream)
             .await;
         
-        if let Err(e) = create_response {
-            if let StreamCreateError::Create { stream: _, status } = e {
-                match status {
-                    ResponseCode::StreamAlreadyExists => {},
-                    err => {
-                        println!("Error creating stream: {:?} {:?}", stream, err);
-                    }
+        if let Err(StreamCreateError::Create { stream: _, status }) = create_response {
+            match status {
+                ResponseCode::StreamAlreadyExists => {},
+                err => {
+                    println!("Error creating stream: {:?} {:?}", stream, err);
                 }
             }
         }
@@ -62,7 +50,7 @@ impl QueueConnectionWriter {
             .producer()
             .build(&stream)
             .await
-            .map_err(|e| RelayerError::QueueProducerCreateError(e))?;
+            .map_err(RelayerError::QueueProducerCreateError)?;
         
         Ok(Self {
             environment,
@@ -93,7 +81,7 @@ impl QueueConnectionConsumer {
         let environment = Environment::builder()
             .build()
             .await
-            .map_err(|e| RelayerError::QueueClientError(e))?;
+            .map_err( RelayerError::QueueClientError)?;
         let stream = String::from(STREAM);
         
         let create_response = environment
@@ -103,13 +91,11 @@ impl QueueConnectionConsumer {
             .await;
 
         
-        if let Err(e) = create_response {
-            if let StreamCreateError::Create { stream: _, status } = e {
-                match status {
-                    ResponseCode::StreamAlreadyExists => {},
-                    err => {
-                        println!("Error creating stream: {:?} {:?}", stream, err);
-                    }
+        if let Err(StreamCreateError::Create { stream: _, status }) = create_response {
+            match status {
+                ResponseCode::StreamAlreadyExists => {},
+                err => {
+                    println!("Error creating stream: {:?} {:?}", stream, err);
                 }
             }
         }
@@ -119,7 +105,7 @@ impl QueueConnectionConsumer {
             .offset(offset_spec)
             .build(&stream)
             .await
-            .map_err(|e| RelayerError::QueueConsumerCreateError(e))?;
+            .map_err( RelayerError::QueueConsumerCreateError)?;
         
         Ok(Self {
             environment,

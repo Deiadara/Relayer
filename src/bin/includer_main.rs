@@ -6,10 +6,8 @@ use eyre::Result;
 use relayer::utils;
 use serde_json::Value;
 use relayer::utils::verify_minted_log;
-use relayer::subscriber;
 use relayer::includer;
 use relayer::queue;
-use relayer::errors::RelayerError;
 
 
 const ADDRESS_PATH : &str = "../project_eth/data/deployments.json";

@@ -1,5 +1,4 @@
 use crate::errors::RelayerError;
-use crate::queue;
 use alloy::{
     transports::http::reqwest::Url,
     dyn_abi::{DynSolType, DynSolValue}, primitives::{keccak256, Address, FixedBytes, B256}, providers::{
@@ -9,12 +8,7 @@ use alloy::{
 use serde::{Serialize, Deserialize};
 use eyre::Result;
 use redis::{aio::MultiplexedConnection, AsyncCommands, Client};
-use crate::utils;
-use crate::includer::Includer;
-use std::{fs,thread, time, env};
-use dotenv::dotenv;
-use serde_json::Value;
-use utils::log_to_deposit;
+use std::env;
 
 type ProviderType = FillProvider<JoinFill<Identity,JoinFill<GasFiller,JoinFill<BlobGasFiller,JoinFill<NonceFiller, ChainIdFiller>>>>,RootProvider>;
 
