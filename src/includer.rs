@@ -10,22 +10,22 @@ use alloy::{
     rpc::types::TransactionReceipt,
     signers::local::PrivateKeySigner
 };
-use crate::queue::QueueConnectionConsumer;
+use crate::queue::Queue;
 use eyre::Result;
 use serde_json::Value;
 type ProviderType = FillProvider<JoinFill<JoinFill<Identity, JoinFill<GasFiller, JoinFill<BlobGasFiller, JoinFill<NonceFiller,ChainIdFiller>>>>, WalletFiller<EthereumWallet>>, RootProvider>;
 type ContractType = ContractInstance<ProviderType, Ethereum>;
 
-pub struct Includer {
+pub struct Includer<C : Queue> {
     pub provider : ProviderType,
     pub contract : ContractType,
-    pub queue_connection : QueueConnectionConsumer
+    pub queue_connection : C
 }
 
 const TOKEN_DATA_PATH : &str = "../project_eth/data/TokenData.json";
 
-impl Includer {
-    pub async fn new(dst_rpc_url: &Url ,contract_address : Address, queue_connection : QueueConnectionConsumer) -> Result<Self> {
+impl<C : Queue> Includer<C> {
+    pub async fn new(dst_rpc_url: &Url ,contract_address : Address, queue_connection : C) -> Result<Self> {
         
         let data_str = fs::read_to_string(TOKEN_DATA_PATH)?;
         let data_json: Value = serde_json::from_str(&data_str)?;

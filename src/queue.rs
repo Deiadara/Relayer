@@ -9,7 +9,7 @@ use crate::subscriber::Deposit;
 use rabbitmq_stream_client::types::Message;
 use async_trait::async_trait;
 
-const STREAM : &str = "relayer-stream-ananeosiok212";
+const STREAM : &str = "relayer-stream-102";
 
 #[async_trait]
 
