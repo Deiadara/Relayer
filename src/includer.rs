@@ -10,7 +10,7 @@ use alloy::{
     rpc::types::TransactionReceipt,
     signers::local::PrivateKeySigner
 };
-use crate::queue::{self,QueueConnectionConsumer};
+use crate::queue::QueueConnectionConsumer;
 use eyre::Result;
 use serde_json::Value;
 type ProviderType = FillProvider<JoinFill<JoinFill<Identity, JoinFill<GasFiller, JoinFill<BlobGasFiller, JoinFill<NonceFiller,ChainIdFiller>>>>, WalletFiller<EthereumWallet>>, RootProvider>;

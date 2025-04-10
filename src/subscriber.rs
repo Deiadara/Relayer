@@ -1,5 +1,5 @@
-use crate::{errors::RelayerError, queue::{QueueConnectionWriter, QueueConnectionConsumer}};
-use crate::queue::{self, Queue};
+use crate::errors::RelayerError;
+use crate::queue::Queue;
 use alloy::{
     transports::http::reqwest::Url,
     dyn_abi::{DynSolType, DynSolValue}, primitives::{keccak256, Address, FixedBytes, B256}, providers::{
