@@ -10,20 +10,22 @@ use alloy::{
     rpc::types::TransactionReceipt,
     signers::local::PrivateKeySigner
 };
+use crate::queue::{self,QueueConnectionConsumer};
 use eyre::Result;
 use serde_json::Value;
 type ProviderType = FillProvider<JoinFill<JoinFill<Identity, JoinFill<GasFiller, JoinFill<BlobGasFiller, JoinFill<NonceFiller,ChainIdFiller>>>>, WalletFiller<EthereumWallet>>, RootProvider>;
 type ContractType = ContractInstance<ProviderType, Ethereum>;
 
 pub struct Includer {
-    provider : ProviderType,
-    contract : ContractType
+    pub provider : ProviderType,
+    pub contract : ContractType,
+    pub queue_connection : QueueConnectionConsumer
 }
 
 const TOKEN_DATA_PATH : &str = "../project_eth/data/TokenData.json";
 
 impl Includer {
-    pub fn new(dst_rpc_url: &Url ,contract_address : Address) -> Result<Self> {
+    pub async fn new(dst_rpc_url: &Url ,contract_address : Address, queue_connection : QueueConnectionConsumer) -> Result<Self> {
         
         let data_str = fs::read_to_string(TOKEN_DATA_PATH)?;
         let data_json: Value = serde_json::from_str(&data_str)?;
@@ -33,10 +35,10 @@ impl Includer {
         let wallet = EthereumWallet::from(pk);
         let provider = ProviderBuilder::new().wallet(wallet).on_http(dst_rpc_url.clone());
         let contract: ContractType = ContractInstance::new(contract_address, provider.clone(), Interface::new(abi.clone()));
-    
         Ok(Self {
             provider,
-            contract
+            contract,
+            queue_connection
         })
     }
 

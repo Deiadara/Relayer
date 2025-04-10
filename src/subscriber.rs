@@ -1,4 +1,5 @@
-use crate::errors::RelayerError;
+use crate::{errors::RelayerError, queue::{QueueConnectionWriter, QueueConnectionConsumer}};
+use crate::queue::{self, Queue};
 use alloy::{
     transports::http::reqwest::Url,
     dyn_abi::{DynSolType, DynSolValue}, primitives::{keccak256, Address, FixedBytes, B256}, providers::{
@@ -19,18 +20,18 @@ pub struct Deposit {
     pub amount: i32,
 }
 
-pub struct Subscriber {
-    contract_address : Address,
-    provider : ProviderType,
-    event_sig : FixedBytes<32>,
-    con : MultiplexedConnection
+pub struct Subscriber<C : Queue> {
+    pub contract_address : Address,
+    pub provider : ProviderType,
+    pub event_sig : FixedBytes<32>,
+    pub con : MultiplexedConnection,
+    pub queue_connection : C
 }
 
 const DEPOSIT_EVENT_SIG : &str = "Deposited(address,string)";
 
-impl Subscriber {
-    pub async fn new(rpc_url: &Url ,contract_address : Address) -> Result<Self> {
-
+impl<C : Queue> Subscriber<C> {
+    pub async fn new(rpc_url: &Url, contract_address: Address, queue_connection: C) -> Result<Self> {
         let db_url = env::var("DB_URL").expect("DB_URL not set");
 
         let client = Client::open(db_url)?;
@@ -39,12 +40,13 @@ impl Subscriber {
         let event_sig = keccak256(DEPOSIT_EVENT_SIG);
         let provider: ProviderType = ProviderBuilder::new().on_http(rpc_url.clone());
 
-            Ok(Self {
-                contract_address,
-                provider,
-                event_sig,
-                con
-            })
+        Ok(Self {
+            contract_address,
+            provider,
+            event_sig,
+            con,
+            queue_connection
+        })
     }
 
     pub async fn get_deposits(&mut self) -> Result<Vec<Deposit>,RelayerError> {
@@ -123,10 +125,6 @@ impl Subscriber {
 // make deposit_to_log it testable
 
 // includer : mock contract and provider and see that they re called with the correct arguments
-
-// src/bin can have many "main" binaries, make different for subscriber and includer, deprecate main
-
-// queue will be like a database service that runs locally, sub writes, incl reads (see rabbit from aobp)
 
 // make a queue.rs with a class that initiates a connection to the queue, it will have push and consume
 // sub and incl in their main will make an instance of queue. In their constructor they will have the connection

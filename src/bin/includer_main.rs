@@ -3,13 +3,10 @@ use dotenv::dotenv;
 use alloy::{primitives::Address,
     transports::http::reqwest::Url};
 use eyre::Result;
-use relayer::utils;
 use serde_json::Value;
 use relayer::utils::verify_minted_log;
 use relayer::includer;
-use relayer::queue;
-
-
+use relayer::queue::{self,Queue};
 const ADDRESS_PATH : &str = "../project_eth/data/deployments.json";
 
 #[tokio::main]
@@ -32,11 +29,12 @@ async fn main() -> Result<()> {
 
     let rpc_url_dst: Url = dst_rpc.parse()?;
 
-    let incl = includer::Includer::new(&rpc_url_dst, dst_contract_address).unwrap();
-    let mut queue_connection = queue::get_queue_connection_consumer().await?;
+    let queue_connection = queue::get_queue_connection_consumer().await?;
+
+    let mut incl = includer::Includer::new(&rpc_url_dst, dst_contract_address, queue_connection).await?;
 
     loop {
-        match utils::log_to_mint(&mut queue_connection).await { 
+        match incl.queue_connection.consume().await { 
             Ok(dep) => {
                 println!("Successfully received");
                 match incl.mint(dep.amount).await {

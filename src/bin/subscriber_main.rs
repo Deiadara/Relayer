@@ -4,10 +4,8 @@ use alloy::{primitives::Address,
     transports::http::reqwest::Url};
 use eyre::Result;
 use serde_json::Value;
-use relayer::utils::log_to_deposit;
+use relayer::queue::{self,Queue};
 use relayer::subscriber;
-use relayer::queue;
-
 const ADDRESS_PATH : &str = "../project_eth/data/deployments.json";
 
 #[tokio::main]
@@ -27,14 +25,14 @@ async fn main() -> Result<()> {
 
     let rpc_url : Url  = src_rpc.parse()?;
 
-    let mut sub = subscriber::Subscriber::new(&rpc_url, contract_address).await.unwrap();
-
     let queue_connection = queue::get_queue_connection_writer().await?;
+
+    let mut sub = subscriber::Subscriber::new(&rpc_url, contract_address, queue_connection).await.unwrap();
 
     loop {
         let deposits = sub.get_deposits().await?;
         for dep in deposits {
-            match log_to_deposit(dep, &queue_connection).await {
+            match sub.queue_connection.push(dep).await {
                 Ok(_) => {
                     println!("Successfully processed deposit");
                 }
