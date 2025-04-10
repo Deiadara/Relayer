@@ -130,22 +130,6 @@ impl QueueConnectionWriter {
             producer
         })
     }
-    
-    // pub async fn push(&mut self,dep: Deposit) -> Result<(), RelayerError> {
-    //     println!("Event emitted from sender: {:?}", dep.sender);
-    
-    //     let serialized_deposit = serde_json::to_vec(&dep)
-    //         .map_err( RelayerError::SerdeError)?;
-        
-    //     self.producer
-    //         .send_with_confirm(Message::builder().body(serialized_deposit).build())
-    //         .await
-    //         .map_err( RelayerError::QueueProducerPublishError)?;
-        
-    //     println!("Wrote in queue successfully!");
-    //     Ok(())
-    // }
-    
 }
 
 
@@ -203,39 +187,6 @@ impl QueueConnectionConsumer {
             offset
         })
     }
-
-
-    // pub async fn consume(&mut self) -> Result<Deposit, RelayerError> {
-    //     println!("Waiting for a deposit message...");
-
-    //     while let Some(delivery_result) = self.consumer.next().await {
-    //         match delivery_result {
-    //             Ok(delivery) => {
-    //                 if let Some(data_bytes) = delivery.message().data() {
-    //                     match serde_json::from_slice::<Deposit>(data_bytes) {
-    //                         Ok(deposit) => {
-    //                             println!("Got deposit: {:?} at offset {}", deposit, delivery.offset());
-    //                             let _response: String = self.dbcon
-    //                                 .set("last_offset", delivery.offset() + 1)
-    //                                 .await
-    //                                 .map_err(|e| RelayerError::RedisError(e.to_string()))?;
-    //                             return Ok(deposit);
-    //                         }
-    //                         Err(_e) => {
-    //                             continue;
-    //                         }
-    //                     }
-    //                 } else {
-    //                     eprintln!("No data in message");
-    //                 }
-    //             }
-    //             Err(e) => {
-    //                 eprintln!("Delivery error: {:?}", e);
-    //             }
-    //         }    
-    //     }
-    //     Err(RelayerError::Other("Consumer stream ended unexpectedly".into()))
-    // }
 }
 
 pub async fn get_queue_connection_writer() -> Result<QueueConnectionWriter,RelayerError>{
