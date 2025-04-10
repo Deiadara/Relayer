@@ -1,10 +1,10 @@
-use alloy::rpc::types::eth::TransactionReceipt;
 use alloy::primitives::keccak256;
+use alloy::rpc::types::eth::TransactionReceipt;
 
 use crate::errors::RelayerError;
 use eyre::Result;
 
-const MINT_EVENT_SIG : &str = "Minted(address,string)";
+const MINT_EVENT_SIG: &str = "Minted(address,string)";
 
 pub fn verify_minted_log(receipt: &TransactionReceipt) -> Result<(), RelayerError> {
     let first_log = receipt.logs().first().ok_or(RelayerError::NoLogs)?;

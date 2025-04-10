@@ -1,6 +1,7 @@
+use rabbitmq_stream_client::error::{
+    ClientError, ConsumerCloseError, ConsumerCreateError, ProducerCreateError, ProducerPublishError,
+};
 use thiserror::Error;
-use rabbitmq_stream_client::error::{ProducerCreateError,ProducerPublishError, ClientError, ConsumerCloseError, ConsumerCreateError};
-
 
 #[derive(Error, Debug)]
 pub enum RelayerError {
@@ -41,11 +42,11 @@ pub enum RelayerError {
     QueueClientError(#[from] ClientError),
 
     #[error("Consumer close failed: {0}")]
-    QueueConsumerCloseError(#[from] ConsumerCloseError), 
+    QueueConsumerCloseError(#[from] ConsumerCloseError),
 
     #[error("Serialization error: {0}")]
     SerdeError(#[from] serde_json::Error),
 
     #[error("Unhandled error: {0}")]
-    Other(String)
+    Other(String),
 }

@@ -1,17 +1,15 @@
-use std::{fs,thread, time, env};
+use alloy::{primitives::Address, transports::http::reqwest::Url};
 use dotenv::dotenv;
-use alloy::{primitives::Address,
-    transports::http::reqwest::Url};
 use eyre::Result;
-use serde_json::Value;
-use relayer::utils::verify_minted_log;
 use relayer::includer;
-use relayer::queue::{self,Queue};
-const ADDRESS_PATH : &str = "../project_eth/data/deployments.json";
+use relayer::queue::{self, Queue};
+use relayer::utils::verify_minted_log;
+use serde_json::Value;
+use std::{env, fs, thread, time};
+const ADDRESS_PATH: &str = "../project_eth/data/deployments.json";
 
 #[tokio::main]
 async fn main() -> Result<()> {
-
     dotenv().ok();
 
     let dst_rpc = env::var("DST_RPC").expect("DST_RPC not set");
@@ -31,10 +29,11 @@ async fn main() -> Result<()> {
 
     let queue_connection = queue::get_queue_connection_consumer().await?;
 
-    let mut incl = includer::Includer::new(&rpc_url_dst, dst_contract_address, queue_connection).await?;
+    let mut incl =
+        includer::Includer::new(&rpc_url_dst, dst_contract_address, queue_connection).await?;
 
     loop {
-        match incl.queue_connection.consume().await { 
+        match incl.queue_connection.consume().await {
             Ok(dep) => {
                 println!("Successfully received");
                 match incl.mint(dep.amount).await {
@@ -42,14 +41,13 @@ async fn main() -> Result<()> {
                         println!("Transaction successful! Receipt: {:?}", receipt);
                         if !receipt.status() {
                             println!("Transaction failed, status is 0");
-                        }
-                        else {
+                        } else {
                             match verify_minted_log(&receipt) {
                                 Ok(_) => {
                                     println!("Tokens minted succesfully!");
                                 }
                                 Err(e) => {
-                                    eprint!("Couldn't verify minted log : {}",e)
+                                    eprint!("Couldn't verify minted log : {}", e)
                                 }
                             }
                         }
@@ -69,6 +67,4 @@ async fn main() -> Result<()> {
         let two_sec = time::Duration::from_millis(2000);
         thread::sleep(two_sec);
     }
-
-
 }

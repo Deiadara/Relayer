@@ -1,16 +1,14 @@
-use std::{fs,thread, time, env};
+use alloy::{primitives::Address, transports::http::reqwest::Url};
 use dotenv::dotenv;
-use alloy::{primitives::Address,
-    transports::http::reqwest::Url};
 use eyre::Result;
-use serde_json::Value;
-use relayer::queue::{self,Queue};
+use relayer::queue::{self, Queue};
 use relayer::subscriber;
-const ADDRESS_PATH : &str = "../project_eth/data/deployments.json";
+use serde_json::Value;
+use std::{env, fs, thread, time};
+const ADDRESS_PATH: &str = "../project_eth/data/deployments.json";
 
 #[tokio::main]
 async fn main() -> Result<()> {
-
     dotenv().ok();
 
     let src_rpc = env::var("SRC_RPC").expect("SRC_RPC not set");
@@ -23,11 +21,13 @@ async fn main() -> Result<()> {
 
     println!("Loaded deposit_address: {:?}", contract_address);
 
-    let rpc_url : Url  = src_rpc.parse()?;
+    let rpc_url: Url = src_rpc.parse()?;
 
     let queue_connection = queue::get_queue_connection_writer().await?;
 
-    let mut sub = subscriber::Subscriber::new(&rpc_url, contract_address, queue_connection).await.unwrap();
+    let mut sub = subscriber::Subscriber::new(&rpc_url, contract_address, queue_connection)
+        .await
+        .unwrap();
 
     loop {
         let deposits = sub.get_deposits().await?;
@@ -41,7 +41,7 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        
+
         let two_sec = time::Duration::from_millis(2000);
         thread::sleep(two_sec);
     }
