@@ -1,5 +1,5 @@
-use crate::errors::RelayerError;
-use crate::queue::Queue;
+use crate::queue::{Queue, get_queue_connection_consumer_with_redis};
+use crate::{errors::RelayerError, queue::QueueConnectionConsumer};
 use alloy::{
     dyn_abi::{DynSolType, DynSolValue},
     primitives::{Address, B256, FixedBytes, keccak256},
@@ -10,11 +10,13 @@ use alloy::{
     rpc::types::Filter,
     transports::http::reqwest::Url,
 };
+use async_trait::async_trait;
 use eyre::Result;
+use mockall::predicate::*;
+use mockall::*;
 use redis::{AsyncCommands, Client, aio::MultiplexedConnection};
 use serde::{Deserialize, Serialize};
 use std::env;
-
 type ProviderType = FillProvider<
     JoinFill<
         Identity,
@@ -23,7 +25,7 @@ type ProviderType = FillProvider<
     RootProvider,
 >;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 
 pub struct Deposit {
     pub sender: Address,
@@ -36,6 +38,23 @@ pub struct Subscriber<C: Queue> {
     pub event_sig: FixedBytes<32>,
     pub con: MultiplexedConnection,
     pub queue_connection: C,
+}
+#[cfg_attr(test, automock)]
+#[async_trait]
+pub trait RedisClient: Send + Sync {
+    async fn get_last_offset(&mut self, key: &str) -> redis::RedisResult<u64>;
+    async fn set_last_offset(&mut self, key: &str, value: u64) -> redis::RedisResult<()>;
+}
+
+#[async_trait]
+impl RedisClient for MultiplexedConnection {
+    async fn get_last_offset(&mut self, key: &str) -> redis::RedisResult<u64> {
+        AsyncCommands::get(self, key).await
+    }
+
+    async fn set_last_offset(&mut self, key: &str, value: u64) -> redis::RedisResult<()> {
+        AsyncCommands::set(self, key, value).await
+    }
 }
 
 const DEPOSIT_EVENT_SIG: &str = "Deposited(address,string)";
@@ -133,6 +152,20 @@ impl<C: Queue> Subscriber<C> {
     }
 }
 
+#[tokio::test]
+async fn test_get_queue_connection_consumer() {
+    let mut mock_redis = MockRedisClient::new();
+    mock_redis
+        .expect_get_last_offset()
+        .with(eq("last_offset"))
+        .times(1)
+        .returning(|_| Ok(0));
+    let queue_connection: QueueConnectionConsumer =
+        get_queue_connection_consumer_with_redis(Box::new(mock_redis))
+            .await
+            .unwrap();
+    assert_eq!(queue_connection.stream, "relayer-stream-104");
+}
 //todo :
 // tracing library
 // try to make contract throw error and check receipt and logs if they exist
@@ -141,11 +174,8 @@ impl<C: Queue> Subscriber<C> {
 // mock redis to return a certain block and test that getlogs i called with the correct filter (also mock provider)
 // aka fix from and to block and check that filter filters correctly    check mockall rs  (maybe need wrappers and custom templates for providers etc eg builder needs Provider normally but mockProvider in test cases)
 
-// make deposit_to_log it testable
+// make push testable
 
 // includer : mock contract and provider and see that they re called with the correct arguments
 
-// make a queue.rs with a class that initiates a connection to the queue, it will have push and consume
-// sub and incl in their main will make an instance of queue. In their constructor they will have the connection
-// they will have a field C (connection) which implements the trait which implements trait queue (in queue.rs)
 // check photo for queue and redis abstraction

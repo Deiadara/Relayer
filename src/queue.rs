@@ -1,18 +1,20 @@
 use crate::errors::RelayerError;
-use crate::subscriber::Deposit;
+use crate::subscriber::{Deposit, RedisClient};
 use async_trait::async_trait;
+use mockall::automock;
+use mockall::predicate::eq;
 use futures::StreamExt;
 use rabbitmq_stream_client::error::StreamCreateError;
 use rabbitmq_stream_client::types::Message;
 use rabbitmq_stream_client::types::{ByteCapacity, OffsetSpecification, ResponseCode};
 use rabbitmq_stream_client::{Consumer, Environment, NoDedup, Producer};
-use redis::{AsyncCommands, Client, aio::MultiplexedConnection};
+use redis::Client;
 use std::env;
 
-const STREAM: &str = "relayer-stream-102";
+const STREAM: &str = "relayer-stream-104";
 
+#[cfg_attr(test, automock)]
 #[async_trait]
-
 pub trait Queue {
     async fn push(&mut self, dep: Deposit) -> Result<(), RelayerError>;
     async fn consume(&mut self) -> Result<Deposit, RelayerError>;
@@ -28,7 +30,7 @@ pub struct QueueConnectionConsumer {
     pub environment: Environment,
     pub stream: String,
     pub consumer: Consumer,
-    pub dbcon: MultiplexedConnection,
+    pub redis: Box<dyn RedisClient>,
     pub offset: u64,
 }
 
@@ -78,8 +80,8 @@ impl Queue for QueueConnectionConsumer {
                                     delivery.offset()
                                 );
                                 let _: () = self
-                                    .dbcon
-                                    .set("last_offset", delivery.offset() + 1)
+                                    .redis
+                                    .set_last_offset("last_offset", delivery.offset() + 1)
                                     .await
                                     .map_err(|e| RelayerError::RedisError(e.to_string()))?;
                                 return Ok(deposit);
@@ -144,12 +146,13 @@ impl QueueConnectionConsumer {
         let db_url = env::var("DB_URL").expect("DB_URL not set");
 
         let client = Client::open(db_url).map_err(|e| RelayerError::RedisError(e.to_string()))?;
-        let mut dbcon = client
+        let dbcon = client
             .get_multiplexed_async_connection()
             .await
             .map_err(|e| RelayerError::RedisError(e.to_string()))?;
+        let mut redis: Box<dyn RedisClient> = Box::new(dbcon);
 
-        let offset: u64 = dbcon.get("last_offset").await.unwrap_or(0);
+        let offset: u64 = redis.get_last_offset("last_offset").await.unwrap_or(0);
 
         let offset_spec = OffsetSpecification::Offset(offset);
 
@@ -187,7 +190,51 @@ impl QueueConnectionConsumer {
             environment,
             stream,
             consumer,
-            dbcon,
+            redis,
+            offset,
+        })
+    }
+    pub async fn new_with_redis(redis: Box<dyn RedisClient>) -> Result<Self, RelayerError> {
+        let mut redis = redis;  // gotta be some better way?
+        let offset: u64 = redis.get_last_offset("last_offset").await.unwrap_or(0);
+
+        let offset_spec = OffsetSpecification::Offset(offset);
+
+        println!("Starting from offset: {}", offset);
+
+        let environment = Environment::builder()
+            .build()
+            .await
+            .map_err(RelayerError::QueueClientError)?;
+        let stream = String::from(STREAM);
+
+        let create_response = environment
+            .stream_creator()
+            .max_length(ByteCapacity::GB(5))
+            .create(&stream)
+            .await;
+
+        if let Err(StreamCreateError::Create { stream: _, status }) = create_response {
+            match status {
+                ResponseCode::StreamAlreadyExists => {}
+                err => {
+                    println!("Error creating stream: {:?} {:?}", stream, err);
+                }
+            }
+        }
+
+        let consumer: Consumer = environment
+            .consumer()
+            .offset(offset_spec)
+            .build(&stream)
+            .await
+            .map_err(RelayerError::QueueConsumerCreateError)?;
+
+        Ok(Self {
+            environment,
+            stream,
+            consumer,
+            redis,
             offset,
         })
     }
@@ -199,6 +246,50 @@ pub async fn get_queue_connection_writer() -> Result<QueueConnectionWriter, Rela
 }
 
 pub async fn get_queue_connection_consumer() -> Result<QueueConnectionConsumer, RelayerError> {
+
     let queue_connection = QueueConnectionConsumer::new().await?;
     Ok(queue_connection)
+}
+
+pub async fn get_queue_connection_consumer_with_redis(redis: Box<dyn RedisClient>) -> Result<QueueConnectionConsumer, RelayerError> {
+    let queue_connection = QueueConnectionConsumer::new_with_redis(redis).await?;
+    Ok(queue_connection)
+}
+
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_get_queue_connection_writer() {
+        let queue_connection: QueueConnectionWriter = get_queue_connection_writer().await.unwrap();
+        assert_eq!(queue_connection.stream, "relayer-stream-104");
+    }
+
+    #[tokio::test]      
+    async fn test_push() {
+        let mut mock_queue_connection = MockQueue::new();
+        let deposit = Deposit {
+            sender: "0x1234567890123456789012345678901234567890".parse().unwrap(),
+            amount: 100
+        };
+        mock_queue_connection.expect_push().with(eq(deposit.clone())).once().returning(|_| Ok(()));
+        let result = mock_queue_connection.push(deposit).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]      
+    async fn test_consume() {
+        let mut mock_queue_connection = MockQueue::new();
+        mock_queue_connection.expect_consume().once().returning(|| Ok(Deposit {
+            sender: "0x1234567890123456789012345678901234567890".parse().unwrap(),
+            amount: 100
+        }));
+        let result = mock_queue_connection.consume().await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), Deposit {
+            sender: "0x1234567890123456789012345678901234567890".parse().unwrap(),
+            amount: 100
+        });
+
+    }
 }
