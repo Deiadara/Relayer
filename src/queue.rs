@@ -11,7 +11,7 @@ use rabbitmq_stream_client::{Consumer, Environment, NoDedup, Producer};
 use redis::Client;
 use std::env;
 
-const STREAM: &str = "relayer-stream-104";
+const STREAM: &str = "relayer-stream-105";
 
 #[cfg_attr(test, automock)]
 #[async_trait]
@@ -262,7 +262,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_queue_connection_writer() {
         let queue_connection: QueueConnectionWriter = get_queue_connection_writer().await.unwrap();
-        assert_eq!(queue_connection.stream, "relayer-stream-104");
+        assert_eq!(queue_connection.stream, "relayer-stream-105");
     }
 
     #[tokio::test]      

@@ -17,11 +17,17 @@ pub enum RelayerError {
     #[error("No address found in topics.")]
     NoAddress,
 
+    #[error("Failed to create message: {0}")]
+    FsStdIOError(#[from] std::io::Error),
+
     #[error("Data is not string")]
     NotString,
 
     #[error(transparent)]
     AbiError(#[from] alloy::dyn_abi::Error),
+
+    #[error(transparent)]
+    FromHexError(#[from] alloy::hex::FromHexError),
 
     #[error("Provider call failed: {0}")]
     ProviderError(String),

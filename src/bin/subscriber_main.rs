@@ -1,31 +1,24 @@
-use alloy::{primitives::Address, transports::http::reqwest::Url};
+use alloy::transports::http::reqwest::Url;
 use dotenv::dotenv;
 use eyre::Result;
 use relayer::queue::{self, Queue};
 use relayer::subscriber;
-use serde_json::Value;
-use std::{env, fs, thread, time};
-const ADDRESS_PATH: &str = "../project_eth/data/deployments.json";
+use mockall;
+use relayer::utils::get_src_contract_addr;
+use std::{env, thread, time};
 
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv().ok();
 
     let src_rpc = env::var("SRC_RPC").expect("SRC_RPC not set");
-
-    let address_str = fs::read_to_string(ADDRESS_PATH)?;
-    let json: Value = serde_json::from_str(&address_str)?;
-
-    let contract_addr = json["Deposit"].as_str().expect("Deposit address not found");
-    let contract_address: Address = contract_addr.parse()?;
-
-    println!("Loaded deposit_address: {:?}", contract_address);
-
     let rpc_url: Url = src_rpc.parse()?;
+    let src_contract_address = get_src_contract_addr()?;
+    println!("Loaded deposit_address: {:?}", src_contract_address);
 
     let queue_connection = queue::get_queue_connection_writer().await?;
 
-    let mut sub = subscriber::Subscriber::new(&rpc_url, contract_address, queue_connection)
+    let mut sub = subscriber::Subscriber::new(&rpc_url, src_contract_address, queue_connection)
         .await
         .unwrap();
 

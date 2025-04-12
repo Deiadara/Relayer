@@ -152,19 +152,22 @@ impl<C: Queue> Subscriber<C> {
     }
 }
 
-#[tokio::test]
-async fn test_get_queue_connection_consumer() {
-    let mut mock_redis = MockRedisClient::new();
-    mock_redis
-        .expect_get_last_offset()
-        .with(eq("last_offset"))
-        .times(1)
-        .returning(|_| Ok(0));
-    let queue_connection: QueueConnectionConsumer =
-        get_queue_connection_consumer_with_redis(Box::new(mock_redis))
-            .await
-            .unwrap();
-    assert_eq!(queue_connection.stream, "relayer-stream-104");
+mod tests {
+    use super::*;
+    #[tokio::test]
+    async fn test_get_queue_connection_consumer() {
+        let mut mock_redis = MockRedisClient::new();
+        mock_redis
+            .expect_get_last_offset()
+            .with(eq("last_offset"))
+            .times(1)
+            .returning(|_| Ok(0));
+        let queue_connection: QueueConnectionConsumer =
+            get_queue_connection_consumer_with_redis(Box::new(mock_redis))
+                .await
+                .unwrap();
+        assert_eq!(queue_connection.stream, "relayer-stream-105");
+    }
 }
 //todo :
 // tracing library

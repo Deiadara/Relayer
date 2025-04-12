@@ -1,32 +1,23 @@
 use alloy::{primitives::Address, transports::http::reqwest::Url};
 use dotenv::dotenv;
 use eyre::Result;
+use mockall::automock;
+use mockall::predicate::eq;
 use relayer::includer;
 use relayer::queue::{self, Queue};
-use relayer::utils::verify_minted_log;
+use relayer::utils::{verify_minted_log, get_dst_contract_addr};
 use serde_json::Value;
+use std::ops::Add;
 use std::{env, fs, thread, time};
-const ADDRESS_PATH: &str = "../project_eth/data/deployments.json";
+
 
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv().ok();
 
     let dst_rpc = env::var("DST_RPC").expect("DST_RPC not set");
-
-    let address_str = fs::read_to_string(ADDRESS_PATH)?;
-    let json: Value = serde_json::from_str(&address_str)?;
-
-    let contract_addr = json["Deposit"].as_str().expect("Deposit address not found");
-    let contract_address: Address = contract_addr.parse()?;
-
-    let dst_contract_addr = json["Token"].as_str().expect("Deposit address not found");
-    let dst_contract_address: Address = dst_contract_addr.parse()?;
-
-    println!("Loaded deposit_address: {:?}", contract_address);
-
     let rpc_url_dst: Url = dst_rpc.parse()?;
-
+    let dst_contract_address =  get_dst_contract_addr()?;
     let queue_connection = queue::get_queue_connection_consumer().await?;
 
     let mut incl =
@@ -68,3 +59,4 @@ async fn main() -> Result<()> {
         thread::sleep(two_sec);
     }
 }
+
