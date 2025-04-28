@@ -1,4 +1,4 @@
-use crate::queue::Queue;
+use crate::queue::QueueTrait;
 use alloy::{
     contract::{ContractInstance, Interface},
     dyn_abi::DynSolValue,
@@ -31,7 +31,7 @@ type ProviderType = FillProvider<
 >;
 type ContractType = ContractInstance<ProviderType, Ethereum>;
 
-pub struct Includer<C: Queue> {
+pub struct Includer<C: QueueTrait> {
     pub provider: ProviderType,
     pub contract: ContractType,
     pub queue_connection: C,
@@ -39,7 +39,7 @@ pub struct Includer<C: Queue> {
 
 const TOKEN_DATA_PATH: &str = "../project_eth/data/TokenData.json";
 
-impl<C: Queue> Includer<C> {
+impl<C: QueueTrait> Includer<C> {
     pub async fn new(
         dst_rpc_url: &Url,
         contract_address: Address,
@@ -82,12 +82,4 @@ impl<C: Queue> Includer<C> {
 
         Ok(receipt)
     }
-}
-
-mod tests {
-    use alloy::eips::eip1559::MIN_PROTOCOL_BASE_FEE;
-
-    use super::*;
-    #[tokio::test]
-    async fn test_mint() {}
 }

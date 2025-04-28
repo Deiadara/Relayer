@@ -138,9 +138,7 @@ mod tests {
         "#;
         let json: Value = serde_json::from_str(&json_str).unwrap();
         let err = deployments_from_json(json).unwrap_err();
-        assert!(
-            matches!(err, RelayerError::Other(_))
-        );
+        assert!(matches!(err, RelayerError::Other(_)));
     }
     #[test]
     fn test_deployments_from_json_err_2() {
@@ -152,9 +150,6 @@ mod tests {
         "#;
         let json: Value = serde_json::from_str(&json_str).unwrap();
         let err = deployments_from_json(json).unwrap_err();
-        assert!(
-            matches!(err, RelayerError::FromHexError(_))
-        );
+        assert!(matches!(err, RelayerError::FromHexError(_)));
     }
-
 }

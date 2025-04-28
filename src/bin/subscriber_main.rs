@@ -2,7 +2,7 @@ use alloy::transports::http::reqwest::Url;
 use dotenv::dotenv;
 use eyre::Result;
 use mockall;
-use relayer::queue::{self, Queue};
+use relayer::queue::{self, QueueTrait};
 use relayer::subscriber;
 use relayer::utils::get_src_contract_addr;
 use std::{env, thread, time};
@@ -18,7 +18,7 @@ async fn main() -> Result<()> {
     let src_contract_address = get_src_contract_addr(ADDRESS_PATH)?;
     println!("Loaded deposit_address: {:?}", src_contract_address);
 
-    let queue_connection = queue::get_queue_connection_writer().await?;
+    let queue_connection = queue::get_queue_connection().await?;
 
     let mut sub = subscriber::Subscriber::new(&rpc_url, src_contract_address, queue_connection)
         .await
@@ -27,7 +27,7 @@ async fn main() -> Result<()> {
     loop {
         let deposits = sub.get_deposits().await?;
         for dep in deposits {
-            match sub.queue_connection.push(dep).await {
+            match sub.queue_connection.publish(dep).await {
                 Ok(_) => {
                     println!("Successfully processed deposit");
                 }

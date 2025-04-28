@@ -3,8 +3,9 @@ use dotenv::dotenv;
 use eyre::Result;
 use mockall::automock;
 use mockall::predicate::eq;
+use queue::consume;
 use relayer::includer;
-use relayer::queue::{self, Queue};
+use relayer::queue::{self, QueueTrait};
 use relayer::utils::{get_dst_contract_addr, verify_minted_log};
 use serde_json::Value;
 use std::ops::Add;
@@ -19,13 +20,15 @@ async fn main() -> Result<()> {
     let dst_rpc = env::var("DST_RPC").expect("DST_RPC not set");
     let rpc_url_dst: Url = dst_rpc.parse()?;
     let dst_contract_address = get_dst_contract_addr(ADDRESS_PATH)?;
-    let queue_connection = queue::get_queue_connection_consumer().await?;
+    let mut queue_connection = queue::get_queue_connection().await?;
 
-    let mut incl =
-        includer::Includer::new(&rpc_url_dst, dst_contract_address, queue_connection).await?;
+    let incl =
+        includer::Includer::new(&rpc_url_dst, dst_contract_address, queue_connection.clone())
+            .await?;
+    let mut consumer = queue_connection.consumer().await?;
 
     loop {
-        match incl.queue_connection.consume().await {
+        match consume(&mut consumer).await {
             Ok(dep) => {
                 println!("Successfully received");
                 match incl.mint(dep.amount).await {

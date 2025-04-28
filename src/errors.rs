@@ -1,6 +1,3 @@
-use rabbitmq_stream_client::error::{
-    ClientError, ConsumerCloseError, ConsumerCreateError, ProducerCreateError, ProducerPublishError,
-};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -35,23 +32,11 @@ pub enum RelayerError {
     #[error("Redis call failed: {0}")]
     RedisError(String),
 
-    #[error("Failed to create message: {0}")]
-    QueueProducerCreateError(#[from] ProducerCreateError),
-
-    #[error("Failed to create message: {0}")]
-    QueueConsumerCreateError(#[from] ConsumerCreateError),
-
-    #[error("Failed to publish message: {0}")]
-    QueueProducerPublishError(#[from] ProducerPublishError),
-
-    #[error("Client creation failed: {0:?}")]
-    QueueClientError(#[from] ClientError),
-
-    #[error("Consumer close failed: {0}")]
-    QueueConsumerCloseError(#[from] ConsumerCloseError),
-
     #[error("Serialization error: {0}")]
     SerdeError(#[from] serde_json::Error),
+
+    #[error("AMQP error: {0}")]
+    AmqpError(#[from] lapin::Error),
 
     #[error("Unhandled error: {0}")]
     Other(String),

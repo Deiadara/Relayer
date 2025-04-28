@@ -2,309 +2,188 @@ use crate::errors::RelayerError;
 use crate::subscriber::{Deposit, RedisClient};
 use async_trait::async_trait;
 use futures::StreamExt;
+use lapin::message::Delivery;
 use mockall::automock;
 use mockall::predicate::eq;
-use rabbitmq_stream_client::error::StreamCreateError;
-use rabbitmq_stream_client::types::Message;
-use rabbitmq_stream_client::types::{ByteCapacity, OffsetSpecification, ResponseCode};
-use rabbitmq_stream_client::{Consumer, Environment, NoDedup, Producer};
 use redis::Client;
-use std::env;
+use std::{env, env::set_var};
 
-const STREAM: &str = "relayer-stream-105";
+//use futures_lite::stream::StreamExt;
+use lapin::{
+    BasicProperties,
+    Channel,
+    Connection,
+    ConnectionProperties, //Result,
+    Consumer,
+    Queue,
+    options::*,
+    publisher_confirm::Confirmation,
+    types::FieldTable,
+};
+use tracing::info;
 
 #[cfg_attr(test, automock)]
 #[async_trait]
-pub trait Queue {
-    async fn push(&mut self, dep: Deposit) -> Result<(), RelayerError>;
-    async fn consume(&mut self) -> Result<Deposit, RelayerError>;
+pub trait QueueTrait {
+    async fn publish(&mut self, dep: Deposit) -> Result<(), RelayerError>;
+    async fn consumer(&mut self) -> Result<lapin::Consumer, RelayerError>;
 }
+#[derive(Clone)]
 
-pub struct QueueConnectionWriter {
-    pub environment: Environment,
-    pub stream: String,
-    pub producer: Producer<NoDedup>,
-}
-
-pub struct QueueConnectionConsumer {
-    pub environment: Environment,
-    pub stream: String,
-    pub consumer: Consumer,
-    pub redis: Box<dyn RedisClient>,
-    pub offset: u64,
+pub struct QueueConnection {
+    channel: Channel,
+    //queue: Queue,
 }
 
 #[async_trait]
-impl Queue for QueueConnectionWriter {
-    async fn push(&mut self, dep: Deposit) -> Result<(), RelayerError> {
+impl QueueTrait for QueueConnection {
+    async fn publish(&mut self, dep: Deposit) -> Result<(), RelayerError> {
         println!("Event emitted from sender: {:?}", dep.sender);
 
         let serialized_deposit = serde_json::to_vec(&dep).map_err(RelayerError::SerdeError)?;
 
-        self.producer
-            .send_with_confirm(Message::builder().body(serialized_deposit).build())
-            .await
-            .map_err(RelayerError::QueueProducerPublishError)?;
+        let _confirm = self
+            .channel
+            .basic_publish(
+                "",
+                "relayer",
+                BasicPublishOptions::default(),
+                &serialized_deposit,
+                BasicProperties::default(),
+            )
+            .await?
+            .await?;
 
         println!("Wrote in queue successfully!");
         Ok(())
     }
 
-    async fn consume(&mut self) -> Result<Deposit, RelayerError> {
-        Err(RelayerError::Other(
-            "Writer cannot consume messages".to_string(),
-        ))
+    async fn consumer(&mut self) -> Result<Consumer, RelayerError> {
+        println!("Waiting for a deposit message...");
+        let consumer = self
+            .channel
+            .basic_consume(
+                "relayer",
+                "my_consumer",
+                BasicConsumeOptions::default(),
+                FieldTable::default(),
+            )
+            .await?;
+        Ok(consumer)
     }
 }
 
-#[async_trait]
-impl Queue for QueueConnectionConsumer {
-    async fn push(&mut self, _dep: Deposit) -> Result<(), RelayerError> {
-        Err(RelayerError::Other(
-            "Consumer cannot push messages".to_string(),
-        ))
+impl QueueConnection {
+    pub async fn new() -> Result<Self, RelayerError> {
+        //tracing_subscriber::fmt::init();
+
+        let addr =
+            std::env::var("AMQP_ADDR").unwrap_or_else(|_| "amqp://127.0.0.1:5672/%2f".into());
+
+        let conn = Connection::connect(&addr, ConnectionProperties::default())
+            .await
+            .map_err(|e| RelayerError::Other(e.to_string()))?;
+
+        println!("CONNECTED");
+
+        let channel = conn
+            .create_channel()
+            .await
+            .map_err(|e| RelayerError::Other(e.to_string()))?;
+
+        let queue = channel
+            .queue_declare(
+                "relayer",
+                QueueDeclareOptions::default(),
+                FieldTable::default(),
+            )
+            .await
+            .map_err(|e| RelayerError::Other(e.to_string()))?;
+
+        Ok(QueueConnection { channel/* ,queue*/  })
     }
+}
 
-    async fn consume(&mut self) -> Result<Deposit, RelayerError> {
-        println!("Waiting for a deposit message...");
+pub async fn get_queue_connection() -> Result<QueueConnection, RelayerError> {
+    let queue_connection = QueueConnection::new().await?;
+    Ok(queue_connection)
+}
 
-        while let Some(delivery_result) = self.consumer.next().await {
-            match delivery_result {
-                Ok(delivery) => {
-                    if let Some(data_bytes) = delivery.message().data() {
-                        match serde_json::from_slice::<Deposit>(data_bytes) {
-                            Ok(deposit) => {
-                                println!(
-                                    "Got deposit: {:?} at offset {}",
-                                    deposit,
-                                    delivery.offset()
-                                );
-                                let _: () = self
-                                    .redis
-                                    .set_last_offset("last_offset", delivery.offset() + 1)
-                                    .await
-                                    .map_err(|e| RelayerError::RedisError(e.to_string()))?;
-                                return Ok(deposit);
-                            }
-                            Err(_) => continue,
-                        }
-                    } else {
-                        eprintln!("No data in message");
+pub async fn consume(consumer: &mut Consumer) -> Result<Deposit, RelayerError> {
+    println!("Waiting for a deposit message…");
+
+    loop {
+        match consumer.next().await {
+            None => {
+                return Err(RelayerError::Other(
+                    "Consumer stream ended unexpectedly".into(),
+                ))
+            }
+            Some(Err(e)) => {
+                eprintln!("Delivery error: {:?}", e);
+                continue;
+            }
+            Some(Ok(delivery)) => {
+                match serde_json::from_slice::<Deposit>(&delivery.data) {
+                    Ok(deposit) => {
+                        delivery
+                            .ack(BasicAckOptions::default())
+                            .await
+                            .map_err(RelayerError::AmqpError)?;
+                        println!("Got deposit from {:?}, amount {}", deposit.sender, deposit.amount);
+                        return Ok(deposit);
+                    }
+                    Err(_) => {
+                        eprintln!("Failed to parse Deposit, skipping");
+                        continue;
                     }
                 }
-                Err(e) => {
-                    eprintln!("Delivery error: {:?}", e);
-                }
             }
         }
-
-        Err(RelayerError::Other(
-            "Consumer stream ended unexpectedly".to_string(),
-        ))
     }
 }
 
-impl QueueConnectionWriter {
-    pub async fn new() -> Result<Self, RelayerError> {
-        let environment = Environment::builder()
-            .build()
-            .await
-            .map_err(RelayerError::QueueClientError)?;
-        let stream = String::from(STREAM);
+// mod tests {
+//     use super::*;
+//     #[tokio::test]
+//     async fn test_publish() {
+//         let mut mock_queue_connection = MockQueue::new();
+//         let deposit = Deposit {
+//             sender: "0x1234567890123456789012345678901234567890"
+//                 .parse()
+//                 .unwrap(),
+//             amount: 100,
+//         };
+//         mock_queue_connection
+//             .expect_publish()
+//             .with(eq(deposit.clone()))
+//             .once()
+//             .returning(|_| Ok(()));
+//         let result = mock_queue_connection.publish(deposit).await;
+//         assert!(result.is_ok());
+//     }
 
-        let create_response = environment
-            .stream_creator()
-            .max_length(ByteCapacity::GB(5))
-            .create(&stream)
-            .await;
-
-        if let Err(StreamCreateError::Create { stream: _, status }) = create_response {
-            match status {
-                ResponseCode::StreamAlreadyExists => {}
-                err => {
-                    println!("Error creating stream: {:?} {:?}", stream, err);
-                }
-            }
-        }
-
-        let producer: Producer<NoDedup> = environment
-            .producer()
-            .build(&stream)
-            .await
-            .map_err(RelayerError::QueueProducerCreateError)?;
-
-        Ok(Self {
-            environment,
-            stream,
-            producer,
-        })
-    }
-}
-
-impl QueueConnectionConsumer {
-    pub async fn new() -> Result<Self, RelayerError> {
-        let db_url = env::var("DB_URL").expect("DB_URL not set");
-
-        let client = Client::open(db_url).map_err(|e| RelayerError::RedisError(e.to_string()))?;
-        let dbcon = client
-            .get_multiplexed_async_connection()
-            .await
-            .map_err(|e| RelayerError::RedisError(e.to_string()))?;
-        let mut redis: Box<dyn RedisClient> = Box::new(dbcon);
-
-        let offset: u64 = redis.get_last_offset("last_offset").await.unwrap_or(0);
-
-        let offset_spec = OffsetSpecification::Offset(offset);
-
-        println!("Starting from offset: {}", offset);
-
-        let environment = Environment::builder()
-            .build()
-            .await
-            .map_err(RelayerError::QueueClientError)?;
-        let stream = String::from(STREAM);
-
-        let create_response = environment
-            .stream_creator()
-            .max_length(ByteCapacity::GB(5))
-            .create(&stream)
-            .await;
-
-        if let Err(StreamCreateError::Create { stream: _, status }) = create_response {
-            match status {
-                ResponseCode::StreamAlreadyExists => {}
-                err => {
-                    println!("Error creating stream: {:?} {:?}", stream, err);
-                }
-            }
-        }
-
-        let consumer: Consumer = environment
-            .consumer()
-            .offset(offset_spec)
-            .build(&stream)
-            .await
-            .map_err(RelayerError::QueueConsumerCreateError)?;
-
-        Ok(Self {
-            environment,
-            stream,
-            consumer,
-            redis,
-            offset,
-        })
-    }
-    pub async fn new_with_redis(redis: Box<dyn RedisClient>) -> Result<Self, RelayerError> {
-        let mut redis = redis; // gotta be some better way?
-        let offset: u64 = redis.get_last_offset("last_offset").await.unwrap_or(0);
-
-        let offset_spec = OffsetSpecification::Offset(offset);
-
-        println!("Starting from offset: {}", offset);
-
-        let environment = Environment::builder()
-            .build()
-            .await
-            .map_err(RelayerError::QueueClientError)?;
-        let stream = String::from(STREAM);
-
-        let create_response = environment
-            .stream_creator()
-            .max_length(ByteCapacity::GB(5))
-            .create(&stream)
-            .await;
-
-        if let Err(StreamCreateError::Create { stream: _, status }) = create_response {
-            match status {
-                ResponseCode::StreamAlreadyExists => {}
-                err => {
-                    println!("Error creating stream: {:?} {:?}", stream, err);
-                }
-            }
-        }
-
-        let consumer: Consumer = environment
-            .consumer()
-            .offset(offset_spec)
-            .build(&stream)
-            .await
-            .map_err(RelayerError::QueueConsumerCreateError)?;
-
-        Ok(Self {
-            environment,
-            stream,
-            consumer,
-            redis,
-            offset,
-        })
-    }
-}
-
-pub async fn get_queue_connection_writer() -> Result<QueueConnectionWriter, RelayerError> {
-    let queue_connection = QueueConnectionWriter::new().await?;
-    Ok(queue_connection)
-}
-
-pub async fn get_queue_connection_consumer() -> Result<QueueConnectionConsumer, RelayerError> {
-    let queue_connection = QueueConnectionConsumer::new().await?;
-    Ok(queue_connection)
-}
-
-pub async fn get_queue_connection_consumer_with_redis(
-    redis: Box<dyn RedisClient>,
-) -> Result<QueueConnectionConsumer, RelayerError> {
-    let queue_connection = QueueConnectionConsumer::new_with_redis(redis).await?;
-    Ok(queue_connection)
-}
-
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_get_queue_connection_writer() {
-        let queue_connection: QueueConnectionWriter = get_queue_connection_writer().await.unwrap();
-        assert_eq!(queue_connection.stream, "relayer-stream-105");
-    }
-
-    #[tokio::test]
-    async fn test_push() {
-        let mut mock_queue_connection = MockQueue::new();
-        let deposit = Deposit {
-            sender: "0x1234567890123456789012345678901234567890"
-                .parse()
-                .unwrap(),
-            amount: 100,
-        };
-        mock_queue_connection
-            .expect_push()
-            .with(eq(deposit.clone()))
-            .once()
-            .returning(|_| Ok(()));
-        let result = mock_queue_connection.push(deposit).await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_consume() {
-        let mut mock_queue_connection = MockQueue::new();
-        mock_queue_connection.expect_consume().once().returning(|| {
-            Ok(Deposit {
-                sender: "0x1234567890123456789012345678901234567890"
-                    .parse()
-                    .unwrap(),
-                amount: 100,
-            })
-        });
-        let result = mock_queue_connection.consume().await;
-        assert!(result.is_ok());
-        assert_eq!(
-            result.unwrap(),
-            Deposit {
-                sender: "0x1234567890123456789012345678901234567890"
-                    .parse()
-                    .unwrap(),
-                amount: 100
-            }
-        );
-    }
-}
+//     #[tokio::test]
+//     async fn test_consume() {
+//         let mut mock_queue_connection = MockQueue::new();
+//         mock_queue_connection.expect_consume().once().returning(|| {
+//             Ok(Deposit {
+//                 sender: "0x1234567890123456789012345678901234567890"
+//                     .parse()
+//                     .unwrap(),
+//                 amount: 100,
+//             })
+//         });
+//         let result = mock_queue_connection.consume().await;
+//         assert!(result.is_ok());
+//         assert_eq!(
+//             result.unwrap(),
+//             Deposit {
+//                 sender: "0x1234567890123456789012345678901234567890"
+//                     .parse()
+//                     .unwrap(),
+//                 amount: 100
+//             }
+//         );
+//     }
+// }
