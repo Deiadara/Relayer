@@ -83,3 +83,11 @@ impl<C: Queue> Includer<C> {
         Ok(receipt)
     }
 }
+
+mod tests {
+    use super::*;
+    #[tokio::test]
+    async fn test_mint() {
+        
+    }
+}
