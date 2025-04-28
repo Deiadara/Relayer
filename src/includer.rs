@@ -85,9 +85,9 @@ impl<C: Queue> Includer<C> {
 }
 
 mod tests {
+    use alloy::eips::eip1559::MIN_PROTOCOL_BASE_FEE;
+
     use super::*;
     #[tokio::test]
-    async fn test_mint() {
-        
-    }
+    async fn test_mint() {}
 }

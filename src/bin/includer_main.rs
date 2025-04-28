@@ -5,11 +5,12 @@ use mockall::automock;
 use mockall::predicate::eq;
 use relayer::includer;
 use relayer::queue::{self, Queue};
-use relayer::utils::{verify_minted_log, get_dst_contract_addr};
+use relayer::utils::{get_dst_contract_addr, verify_minted_log};
 use serde_json::Value;
 use std::ops::Add;
 use std::{env, fs, thread, time};
 
+const ADDRESS_PATH: &str = "../project_eth/data/deployments.json";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -17,7 +18,7 @@ async fn main() -> Result<()> {
 
     let dst_rpc = env::var("DST_RPC").expect("DST_RPC not set");
     let rpc_url_dst: Url = dst_rpc.parse()?;
-    let dst_contract_address =  get_dst_contract_addr()?;
+    let dst_contract_address = get_dst_contract_addr(ADDRESS_PATH)?;
     let queue_connection = queue::get_queue_connection_consumer().await?;
 
     let mut incl =
@@ -59,4 +60,3 @@ async fn main() -> Result<()> {
         thread::sleep(two_sec);
     }
 }
-

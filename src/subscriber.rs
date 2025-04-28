@@ -13,7 +13,6 @@ use alloy::{
 use async_trait::async_trait;
 use eyre::Result;
 use mockall::predicate::*;
-use mockall::*;
 use redis::{AsyncCommands, Client, aio::MultiplexedConnection};
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -39,7 +38,7 @@ pub struct Subscriber<C: Queue> {
     pub con: MultiplexedConnection,
     pub queue_connection: C,
 }
-#[cfg_attr(test, automock)]
+#[cfg_attr(test, mockall::automock)]
 #[async_trait]
 pub trait RedisClient: Send + Sync {
     async fn get_last_offset(&mut self, key: &str) -> redis::RedisResult<u64>;
@@ -182,3 +181,5 @@ mod tests {
 // includer : mock contract and provider and see that they re called with the correct arguments
 
 // check photo for queue and redis abstraction
+
+// replace rabbitmq stream with lapin

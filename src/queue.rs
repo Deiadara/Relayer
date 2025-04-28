@@ -1,9 +1,9 @@
 use crate::errors::RelayerError;
 use crate::subscriber::{Deposit, RedisClient};
 use async_trait::async_trait;
+use futures::StreamExt;
 use mockall::automock;
 use mockall::predicate::eq;
-use futures::StreamExt;
 use rabbitmq_stream_client::error::StreamCreateError;
 use rabbitmq_stream_client::types::Message;
 use rabbitmq_stream_client::types::{ByteCapacity, OffsetSpecification, ResponseCode};
@@ -195,7 +195,7 @@ impl QueueConnectionConsumer {
         })
     }
     pub async fn new_with_redis(redis: Box<dyn RedisClient>) -> Result<Self, RelayerError> {
-        let mut redis = redis;  // gotta be some better way?
+        let mut redis = redis; // gotta be some better way?
         let offset: u64 = redis.get_last_offset("last_offset").await.unwrap_or(0);
 
         let offset_spec = OffsetSpecification::Offset(offset);
@@ -246,12 +246,13 @@ pub async fn get_queue_connection_writer() -> Result<QueueConnectionWriter, Rela
 }
 
 pub async fn get_queue_connection_consumer() -> Result<QueueConnectionConsumer, RelayerError> {
-
     let queue_connection = QueueConnectionConsumer::new().await?;
     Ok(queue_connection)
 }
 
-pub async fn get_queue_connection_consumer_with_redis(redis: Box<dyn RedisClient>) -> Result<QueueConnectionConsumer, RelayerError> {
+pub async fn get_queue_connection_consumer_with_redis(
+    redis: Box<dyn RedisClient>,
+) -> Result<QueueConnectionConsumer, RelayerError> {
     let queue_connection = QueueConnectionConsumer::new_with_redis(redis).await?;
     Ok(queue_connection)
 }
@@ -265,31 +266,45 @@ mod tests {
         assert_eq!(queue_connection.stream, "relayer-stream-105");
     }
 
-    #[tokio::test]      
+    #[tokio::test]
     async fn test_push() {
         let mut mock_queue_connection = MockQueue::new();
         let deposit = Deposit {
-            sender: "0x1234567890123456789012345678901234567890".parse().unwrap(),
-            amount: 100
+            sender: "0x1234567890123456789012345678901234567890"
+                .parse()
+                .unwrap(),
+            amount: 100,
         };
-        mock_queue_connection.expect_push().with(eq(deposit.clone())).once().returning(|_| Ok(()));
+        mock_queue_connection
+            .expect_push()
+            .with(eq(deposit.clone()))
+            .once()
+            .returning(|_| Ok(()));
         let result = mock_queue_connection.push(deposit).await;
         assert!(result.is_ok());
     }
 
-    #[tokio::test]      
+    #[tokio::test]
     async fn test_consume() {
         let mut mock_queue_connection = MockQueue::new();
-        mock_queue_connection.expect_consume().once().returning(|| Ok(Deposit {
-            sender: "0x1234567890123456789012345678901234567890".parse().unwrap(),
-            amount: 100
-        }));
+        mock_queue_connection.expect_consume().once().returning(|| {
+            Ok(Deposit {
+                sender: "0x1234567890123456789012345678901234567890"
+                    .parse()
+                    .unwrap(),
+                amount: 100,
+            })
+        });
         let result = mock_queue_connection.consume().await;
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), Deposit {
-            sender: "0x1234567890123456789012345678901234567890".parse().unwrap(),
-            amount: 100
-        });
-
+        assert_eq!(
+            result.unwrap(),
+            Deposit {
+                sender: "0x1234567890123456789012345678901234567890"
+                    .parse()
+                    .unwrap(),
+                amount: 100
+            }
+        );
     }
 }
