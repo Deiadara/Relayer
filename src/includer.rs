@@ -27,6 +27,7 @@ use lapin::{
 };
 use serde_json::Value;
 use std::{env, fs, thread, time};
+use tracing::{debug, error, info, warn};
 type ProviderType = FillProvider<
     JoinFill<
         JoinFill<
@@ -75,7 +76,7 @@ impl<C: QueueTrait> Includer<C> {
     }
 
     pub async fn mint(&self, amount: i32) -> Result<Option<TransactionReceipt>> {
-        println!("New deposit of amount {}", amount);
+        info!("New deposit of amount {}", amount);
         let str_amount = amount.to_string();
         let number_value = DynSolValue::from(str_amount.clone());
         let tx_hash = self
@@ -85,7 +86,7 @@ impl<C: QueueTrait> Includer<C> {
             .await?
             .watch()
             .await?;
-        println!("tx_hash: {tx_hash}");
+        debug!("tx_hash: {tx_hash}");
         let receipt = self.provider.get_transaction_receipt(tx_hash).await?;
 
         Ok(receipt)
@@ -95,9 +96,10 @@ impl<C: QueueTrait> Includer<C> {
         &self,
         consumer: &mut Consumer,
     ) -> Result<(Deposit, Delivery), RelayerError> {
-        println!("Waiting for a deposit message...");
+        info!("Waiting for a deposit message...");
         match consumer.next().await {
             None => {
+                warn!("Stream Ended");
                 return Err(RelayerError::Other(
                     "Consumer stream ended unexpectedly".into(),
                 ));
@@ -107,7 +109,7 @@ impl<C: QueueTrait> Includer<C> {
             }
             Some(Ok(delivery)) => match serde_json::from_slice::<Deposit>(&delivery.data) {
                 Ok(deposit) => {
-                    println!(
+                    debug!(
                         "Got deposit from {:?}, amount {}",
                         deposit.sender, deposit.amount
                     );
@@ -129,10 +131,10 @@ impl<C: QueueTrait> Includer<C> {
             let res = self.process_deposit(&mut consumer).await;
             match res {
                 Ok(_) => {
-                    println!("Successfully processed Deposit");
+                    info!("Successfully processed Deposit");
                 }
                 Err(e) => {
-                    eprintln!("Error : {:?}", e);
+                    error!("Error : {:?}", e);
                 }
             }
             let two_sec = time::Duration::from_millis(2000);
@@ -143,38 +145,38 @@ impl<C: QueueTrait> Includer<C> {
     pub async fn process_deposit(&mut self, consumer: &mut Consumer) -> Result<(), RelayerError> {
         match self.consume(consumer).await {
             Ok(dep) => {
-                println!("Successfully received");
+                debug!("Successfully received");
                 match self.mint(dep.0.amount).await {
                     Ok(Some(receipt)) => {
-                        println!("Transaction successful! Receipt: {:?}", receipt);
+                        debug!("Transaction successful! Receipt: {:?}", receipt);
                         if !receipt.status() {
-                            println!("Transaction failed, status is 0");
+                            warn!("Transaction failed, status is 0");
                         } else {
                             match verify_minted_log(&receipt) {
                                 Ok(_) => {
-                                    println!("Tokens minted succesfully!");
+                                    info!("Tokens minted succesfully!");
                                     Self::ack_deposit(dep.1).await?;
 
                                 }
                                 Err(e) => {
-                                    eprint!("Couldn't verify minted log : {}", e);
+                                    error!("Couldn't verify minted log : {}", e);
                                     Self::nack_deposit(dep.1).await?;
                                 }
                             }
                         }
                     }
                     Ok(None) => {
-                        println!("Transaction sent, but no receipt found.");
+                        warn!("Transaction sent, but no receipt found.");
                         Self::nack_deposit(dep.1).await?;
                     }
                     Err(e) => {
-                        eprint!("Error minting : {:?}", e);
+                        error!("Error minting : {:?}", e);
                         Self::nack_deposit(dep.1).await?;
                     }
                 }
             }
             Err(e) => {
-                eprintln!("Error processing receive: {:?}", e);
+                error!("Error processing receive: {:?}", e);
             }
         }
         Ok(())

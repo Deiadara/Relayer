@@ -2,6 +2,8 @@ use crate::errors::RelayerError;
 use async_trait::async_trait;
 use mockall::automock;
 use mockall::predicate::eq;
+use tracing::debug;
+
 
 use lapin::{
     BasicProperties, Channel, Connection, ConnectionProperties, Consumer, options::*,
@@ -74,7 +76,7 @@ impl LapinConnection {
             .await
             .map_err(|e| RelayerError::Other(e.to_string()))?;
 
-        println!("CONNECTED");
+        debug!("CONNECTED");
 
         let channel = conn
             .create_channel()
