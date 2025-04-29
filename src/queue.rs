@@ -100,7 +100,9 @@ impl QueueConnection {
             .await
             .map_err(|e| RelayerError::Other(e.to_string()))?;
 
-        Ok(QueueConnection { channel/* ,queue*/  })
+        Ok(QueueConnection {
+            channel, /* ,queue*/
+        })
     }
 }
 
@@ -117,28 +119,29 @@ pub async fn consume(consumer: &mut Consumer) -> Result<Deposit, RelayerError> {
             None => {
                 return Err(RelayerError::Other(
                     "Consumer stream ended unexpectedly".into(),
-                ))
+                ));
             }
             Some(Err(e)) => {
                 eprintln!("Delivery error: {:?}", e);
                 continue;
             }
-            Some(Ok(delivery)) => {
-                match serde_json::from_slice::<Deposit>(&delivery.data) {
-                    Ok(deposit) => {
-                        delivery
-                            .ack(BasicAckOptions::default())
-                            .await
-                            .map_err(RelayerError::AmqpError)?;
-                        println!("Got deposit from {:?}, amount {}", deposit.sender, deposit.amount);
-                        return Ok(deposit);
-                    }
-                    Err(_) => {
-                        eprintln!("Failed to parse Deposit, skipping");
-                        continue;
-                    }
+            Some(Ok(delivery)) => match serde_json::from_slice::<Deposit>(&delivery.data) {
+                Ok(deposit) => {
+                    delivery
+                        .ack(BasicAckOptions::default())
+                        .await
+                        .map_err(RelayerError::AmqpError)?;
+                    println!(
+                        "Got deposit from {:?}, amount {}",
+                        deposit.sender, deposit.amount
+                    );
+                    return Ok(deposit);
                 }
-            }
+                Err(_) => {
+                    eprintln!("Failed to parse Deposit, skipping");
+                    continue;
+                }
+            },
         }
     }
 }
