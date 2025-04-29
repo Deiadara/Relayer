@@ -15,7 +15,8 @@ use eyre::Result;
 use mockall::predicate::*;
 use redis::{AsyncCommands, Client, aio::MultiplexedConnection}; // make connection pool at some point
 use serde::{Deserialize, Serialize};
-use std::env;
+use std::{env, thread, time};
+use tracing::{debug, error, info, warn};
 type ProviderType = FillProvider<
     JoinFill<
         Identity,
@@ -112,8 +113,8 @@ impl<C: QueueTrait> Subscriber<C> {
             .from_block(from_block + 1)
             .to_block(to_block);
 
-        println!("Scanning from {} to {to_block}...", from_block + 1);
-        println!("Filter topic0: {:?}", B256::from(self.event_sig));
+        info!("Scanning from {} to {to_block}...", from_block + 1);
+        debug!("Filter topic0: {:?}", B256::from(self.event_sig));
 
         let logs = self
             .provider
@@ -121,7 +122,7 @@ impl<C: QueueTrait> Subscriber<C> {
             .await
             .map_err(|e| RelayerError::ProviderError(e.to_string()))?;
 
-        println!("Got {} logs", logs.len());
+        info!("Got {} logs", logs.len());
 
         for log in logs {
             println!("Transfer event: {log:?}");
@@ -155,10 +156,39 @@ impl<C: QueueTrait> Subscriber<C> {
             .set("from_block", to_block)
             .await
             .map_err(|e| RelayerError::RedisError(e.to_string()))?;
-        println!("Response: {}", response);
+        debug!("Response: {}", response);
 
         Ok(deposits)
     }
+
+    pub async fn run(&mut self) {
+        loop {
+            if let Err(e) = self.work().await {
+                error!("Error: {:?}", e);
+            }
+            let two_sec = time::Duration::from_millis(2000);
+                    thread::sleep(two_sec);
+        }
+    }
+
+    async fn work(&mut self) -> Result<(), RelayerError> {
+        let deposits = self.get_deposits().await?;
+        for dep in deposits {
+            let serialized_deposit = serde_json::to_vec(&dep).map_err(RelayerError::SerdeError)?;
+            info!("Event emitted from sender: {:?}", dep.sender);
+            match self.queue_connection.publish(&serialized_deposit).await {
+                Ok(_) => {
+                    info!("Successfully processed deposit");
+                }
+                Err(e) => {
+                    error!("Error processing deposit: {:?}", e);
+                    return Err(RelayerError::Other(e.to_string()))
+                }
+            }
+        }
+        Ok(())
+    }
+ 
 }
 
 // mod tests {
@@ -178,8 +208,10 @@ impl<C: QueueTrait> Subscriber<C> {
 //         assert_eq!(queue_connection.stream, "relayer-stream-105");
 //     }
 // }
+
+
+
 //todo :
-// tracing library
 // try to make contract throw error and check receipt and logs if they exist
 
 // mock redis to return a certain block and test that getlogs i called with the correct filter (also mock provider)
@@ -188,5 +220,3 @@ impl<C: QueueTrait> Subscriber<C> {
 // make push testable
 
 // includer : mock contract and provider and see that they re called with the correct arguments
-
-// check photo for queue and redis abstraction

@@ -126,8 +126,8 @@ impl<C: QueueTrait> Includer<C> {
 
     pub async fn run(&mut self) {
         let mut consumer = self.queue_connection.consumer().await.unwrap();
+        debug!("Includer is alive.");
         loop {
-            //info!("Includer is alive.");
             let res = self.process_deposit(&mut consumer).await;
             match res {
                 Ok(_) => {
@@ -161,6 +161,7 @@ impl<C: QueueTrait> Includer<C> {
                                 Err(e) => {
                                     error!("Couldn't verify minted log : {}", e);
                                     Self::nack_deposit(dep.1).await?;
+                                    return Err(RelayerError::Other(e.to_string()))
                                 }
                             }
                         }
@@ -172,6 +173,7 @@ impl<C: QueueTrait> Includer<C> {
                     Err(e) => {
                         error!("Error minting : {:?}", e);
                         Self::nack_deposit(dep.1).await?;
+                        return Err(RelayerError::Other(e.to_string()))
                     }
                 }
             }

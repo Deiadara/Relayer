@@ -4,7 +4,14 @@ use alloy::primitives::keccak256;
 use alloy::rpc::types::eth::TransactionReceipt;
 use eyre::Result;
 use serde_json::Value;
+use tracing::level_filters::LevelFilter;
+use tracing_subscriber::fmt;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::Layer;
+use tracing_subscriber::Registry;
 use std::fs;
+use std::str::FromStr;
+
 
 const MINT_EVENT_SIG: &str = "Minted(address,string)";
 #[derive(Debug)]
@@ -20,6 +27,22 @@ impl Deployments {
         let final_deployments = deployments_from_json(json)?;
         Ok(final_deployments)
     }
+}
+
+pub fn setup_logging() {
+    let level = std::env::var("RUST_LOG")
+        .unwrap_or_else(|_| "info".into());
+    let level = LevelFilter::from_str(&level)
+        .unwrap_or(LevelFilter::DEBUG);
+
+    let fmt_layer = fmt::layer()
+        .with_filter(level);
+
+    let subscriber = Registry::default()
+        .with(fmt_layer);
+
+    tracing::subscriber::set_global_default(subscriber)
+        .expect("failed to set tracing subscriber");
 }
 
 pub fn deployments_from_json(json: Value) -> Result<Deployments, RelayerError> {
