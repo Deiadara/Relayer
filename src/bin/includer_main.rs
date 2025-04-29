@@ -1,8 +1,6 @@
 use alloy::transports::http::reqwest::Url;
 use dotenv::dotenv;
 use eyre::Result;
-use mockall::automock;
-use mockall::predicate::eq;
 use relayer::includer;
 use relayer::queue;
 use relayer::utils::{get_dst_contract_addr,setup_logging};

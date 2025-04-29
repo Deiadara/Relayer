@@ -1,13 +1,11 @@
 use alloy::transports::http::reqwest::Url;
 use dotenv::dotenv;
 use eyre::Result;
-use mockall;
-use relayer::errors::RelayerError;
-use relayer::queue::{self, QueueTrait};
+use relayer::queue;
 use relayer::subscriber;
 use relayer::utils::{get_src_contract_addr,setup_logging};
-use std::{env, thread, time};
-use tracing::{debug, error, info};
+use std::env;
+use tracing::debug;
 
 const ADDRESS_PATH: &str = "../project_eth/data/deployments.json";
 
@@ -26,7 +24,6 @@ async fn main() -> Result<()> {
     let mut sub = subscriber::Subscriber::new(&rpc_url, src_contract_address, queue_connection)
         .await
         .unwrap();
-    // move to subscriber
     
     let _res = sub.run().await;
     Ok(())
