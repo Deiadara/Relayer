@@ -2,6 +2,7 @@ use alloy::transports::http::reqwest::Url;
 use dotenv::dotenv;
 use eyre::Result;
 use mockall;
+use relayer::errors::RelayerError;
 use relayer::queue::{self, QueueTrait};
 use relayer::subscriber;
 use relayer::utils::get_src_contract_addr;
@@ -23,11 +24,13 @@ async fn main() -> Result<()> {
     let mut sub = subscriber::Subscriber::new(&rpc_url, src_contract_address, queue_connection)
         .await
         .unwrap();
-
+    // move to subscriber
     loop {
         let deposits = sub.get_deposits().await?;
         for dep in deposits {
-            match sub.queue_connection.publish(dep).await {
+            let serialized_deposit = serde_json::to_vec(&dep).map_err(RelayerError::SerdeError)?;
+            println!("Event emitted from sender: {:?}", dep.sender);
+            match sub.queue_connection.publish(&serialized_deposit).await {
                 Ok(_) => {
                     println!("Successfully processed deposit");
                 }

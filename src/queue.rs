@@ -1,65 +1,55 @@
 use crate::errors::RelayerError;
-use crate::subscriber::{Deposit, RedisClient};
 use async_trait::async_trait;
-use futures::StreamExt;
-use lapin::message::Delivery;
 use mockall::automock;
 use mockall::predicate::eq;
-use redis::Client;
-use std::{env, env::set_var};
 
-//use futures_lite::stream::StreamExt;
 use lapin::{
-    BasicProperties,
-    Channel,
-    Connection,
-    ConnectionProperties, //Result,
-    Consumer,
-    Queue,
-    options::*,
-    publisher_confirm::Confirmation,
+    BasicProperties, Channel, Connection, ConnectionProperties, Consumer, options::*,
     types::FieldTable,
 };
-use tracing::info;
+//use tracing::info;
 
-#[cfg_attr(test, automock)]
 #[async_trait]
 pub trait QueueTrait {
-    async fn publish(&mut self, dep: Deposit) -> Result<(), RelayerError>;
+    type Consumer;
+    async fn publish(&mut self, dep: &Vec<u8>) -> Result<(), RelayerError>;
     async fn consumer(&mut self) -> Result<lapin::Consumer, RelayerError>;
 }
 #[derive(Clone)]
 
-pub struct QueueConnection {
+pub struct LapinConnection {
     channel: Channel,
     //queue: Queue,
 }
 
 #[async_trait]
-impl QueueTrait for QueueConnection {
-    async fn publish(&mut self, dep: Deposit) -> Result<(), RelayerError> {
-        println!("Event emitted from sender: {:?}", dep.sender);
+impl QueueTrait for LapinConnection {
+    type Consumer = lapin::Consumer;
 
-        let serialized_deposit = serde_json::to_vec(&dep).map_err(RelayerError::SerdeError)?;
-
-        let _confirm = self
+    // test : call new for a connection, call  publish with test_item, consume item and check that it is the same item
+    async fn publish(&mut self, serialized_item: &Vec<u8>) -> Result<(), RelayerError> {
+        let confirm = self
             .channel
             .basic_publish(
                 "",
                 "relayer",
                 BasicPublishOptions::default(),
-                &serialized_deposit,
+                serialized_item,
                 BasicProperties::default(),
             )
             .await?
             .await?;
 
-        println!("Wrote in queue successfully!");
-        Ok(())
+        if confirm.is_ack() {
+            return Ok(());
+        } else {
+            return Err(RelayerError::Other(String::from(
+                "Failed to publish to Queue",
+            )));
+        }
     }
-
+    // new connection in queue, put something in and try to consume it using this function and check that it is returned
     async fn consumer(&mut self) -> Result<Consumer, RelayerError> {
-        println!("Waiting for a deposit message...");
         let consumer = self
             .channel
             .basic_consume(
@@ -73,7 +63,7 @@ impl QueueTrait for QueueConnection {
     }
 }
 
-impl QueueConnection {
+impl LapinConnection {
     pub async fn new() -> Result<Self, RelayerError> {
         //tracing_subscriber::fmt::init();
 
@@ -91,7 +81,11 @@ impl QueueConnection {
             .await
             .map_err(|e| RelayerError::Other(e.to_string()))?;
 
-        let queue = channel
+        channel
+            .confirm_select(ConfirmSelectOptions { nowait: false })
+            .await?;
+
+        let _queue = channel
             .queue_declare(
                 "relayer",
                 QueueDeclareOptions::default(),
@@ -100,51 +94,17 @@ impl QueueConnection {
             .await
             .map_err(|e| RelayerError::Other(e.to_string()))?;
 
-        Ok(QueueConnection {
+        Ok(LapinConnection {
             channel, /* ,queue*/
         })
     }
 }
 
-pub async fn get_queue_connection() -> Result<QueueConnection, RelayerError> {
-    let queue_connection = QueueConnection::new().await?;
+pub async fn get_queue_connection() -> Result<LapinConnection, RelayerError> {
+    let queue_connection = LapinConnection::new().await?;
     Ok(queue_connection)
 }
-
-pub async fn consume(consumer: &mut Consumer) -> Result<Deposit, RelayerError> {
-    println!("Waiting for a deposit message…");
-
-    loop {
-        match consumer.next().await {
-            None => {
-                return Err(RelayerError::Other(
-                    "Consumer stream ended unexpectedly".into(),
-                ));
-            }
-            Some(Err(e)) => {
-                eprintln!("Delivery error: {:?}", e);
-                continue;
-            }
-            Some(Ok(delivery)) => match serde_json::from_slice::<Deposit>(&delivery.data) {
-                Ok(deposit) => {
-                    delivery
-                        .ack(BasicAckOptions::default())
-                        .await
-                        .map_err(RelayerError::AmqpError)?;
-                    println!(
-                        "Got deposit from {:?}, amount {}",
-                        deposit.sender, deposit.amount
-                    );
-                    return Ok(deposit);
-                }
-                Err(_) => {
-                    eprintln!("Failed to parse Deposit, skipping");
-                    continue;
-                }
-            },
-        }
-    }
-}
+// move to includer
 
 // mod tests {
 //     use super::*;

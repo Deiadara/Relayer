@@ -13,7 +13,7 @@ use alloy::{
 use async_trait::async_trait;
 use eyre::Result;
 use mockall::predicate::*;
-use redis::{AsyncCommands, Client, aio::MultiplexedConnection};
+use redis::{AsyncCommands, Client, aio::MultiplexedConnection}; // make connection pool at some point
 use serde::{Deserialize, Serialize};
 use std::env;
 type ProviderType = FillProvider<
@@ -40,21 +40,30 @@ pub struct Subscriber<C: QueueTrait> {
 }
 #[cfg_attr(test, mockall::automock)]
 #[async_trait]
-pub trait RedisClient: Send + Sync {
-    async fn get_last_offset(&mut self, key: &str) -> redis::RedisResult<u64>;
+pub trait CacheTrait {
+    async fn get_last_offset(&mut self, key: &str) -> redis::RedisResult<u64>; // block ,    needs to return number and work for any cache
     async fn set_last_offset(&mut self, key: &str, value: u64) -> redis::RedisResult<()>;
 }
 
-#[async_trait]
-impl RedisClient for MultiplexedConnection {
-    async fn get_last_offset(&mut self, key: &str) -> redis::RedisResult<u64> {
-        AsyncCommands::get(self, key).await
-    }
-
-    async fn set_last_offset(&mut self, key: &str, value: u64) -> redis::RedisResult<()> {
-        AsyncCommands::set(self, key, value).await
-    }
+pub struct RedisCache {
+    pub connection: MultiplexedConnection,
 }
+
+// impl CacheTrait for RedisCache {
+//     fun1
+//     fun2
+// }
+
+// #[async_trait]
+// impl CacheTrait for MultiplexedConnection {
+//     async fn get_last_offset(&mut self, key: &str) -> redis::RedisResult<u64> {
+//         AsyncCommands::get(self, key).await
+//     }
+
+//     async fn set_last_offset(&mut self, key: &str, value: u64) -> redis::RedisResult<()> {
+//         AsyncCommands::set(self, key, value).await
+//     }
+// }
 
 const DEPOSIT_EVENT_SIG: &str = "Deposited(address,string)";
 
@@ -83,6 +92,7 @@ impl<C: QueueTrait> Subscriber<C> {
 
     pub async fn get_deposits(&mut self) -> Result<Vec<Deposit>, RelayerError> {
         let mut from_block: u64 = 0;
+        // this is a function of RedisCache
         let from_block_response: Option<u64> = self
             .con
             .get("from_block")
@@ -172,7 +182,6 @@ impl<C: QueueTrait> Subscriber<C> {
 // tracing library
 // try to make contract throw error and check receipt and logs if they exist
 
-// add unit tests to subscriber : edge cases (empty, wrong format), check that they throw the correct error
 // mock redis to return a certain block and test that getlogs i called with the correct filter (also mock provider)
 // aka fix from and to block and check that filter filters correctly    check mockall rs  (maybe need wrappers and custom templates for providers etc eg builder needs Provider normally but mockProvider in test cases)
 
@@ -181,5 +190,3 @@ impl<C: QueueTrait> Subscriber<C> {
 // includer : mock contract and provider and see that they re called with the correct arguments
 
 // check photo for queue and redis abstraction
-
-// replace rabbitmq stream with lapin
