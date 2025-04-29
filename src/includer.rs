@@ -103,7 +103,6 @@ impl<C: QueueTrait> Includer<C> {
                 ));
             }
             Some(Err(e)) => {
-                //eprintln!("Delivery error: {:?}", e);
                 return Err(RelayerError::AmqpError(e));
             }
             Some(Ok(delivery)) => match serde_json::from_slice::<Deposit>(&delivery.data) {
@@ -127,7 +126,7 @@ impl<C: QueueTrait> Includer<C> {
         let mut consumer = self.queue_connection.consumer().await.unwrap();
         loop {
             //info!("Includer is alive.");
-            let res = self.process_deposits(&mut consumer).await;
+            let res = self.process_deposit(&mut consumer).await;
             match res {
                 Ok(_) => {
                     println!("Successfully processed Deposit");
@@ -141,7 +140,7 @@ impl<C: QueueTrait> Includer<C> {
         }
     }
 
-    pub async fn process_deposits(&mut self, consumer: &mut Consumer) -> Result<(), RelayerError> {
+    pub async fn process_deposit(&mut self, consumer: &mut Consumer) -> Result<(), RelayerError> {
         match self.consume(consumer).await {
             Ok(dep) => {
                 println!("Successfully received");
@@ -154,44 +153,23 @@ impl<C: QueueTrait> Includer<C> {
                             match verify_minted_log(&receipt) {
                                 Ok(_) => {
                                     println!("Tokens minted succesfully!");
-                                    dep.1
-                                        .ack(BasicAckOptions::default())
-                                        .await
-                                        .map_err(RelayerError::AmqpError)?;
+                                    Self::ack_deposit(dep.1).await?;
+
                                 }
                                 Err(e) => {
                                     eprint!("Couldn't verify minted log : {}", e);
-                                    dep.1
-                                        .nack(BasicNackOptions {
-                                            multiple: false,
-                                            requeue: false,
-                                        })
-                                        .await
-                                        .map_err(RelayerError::AmqpError)?;
+                                    Self::nack_deposit(dep.1).await?;
                                 }
                             }
                         }
                     }
                     Ok(None) => {
                         println!("Transaction sent, but no receipt found.");
-                        // ??
-                        dep.1
-                            .nack(BasicNackOptions {
-                                multiple: false,
-                                requeue: false,
-                            })
-                            .await
-                            .map_err(RelayerError::AmqpError)?;
+                        Self::nack_deposit(dep.1).await?;
                     }
                     Err(e) => {
                         eprint!("Error minting : {:?}", e);
-                        dep.1
-                            .nack(BasicNackOptions {
-                                multiple: false,
-                                requeue: false,
-                            })
-                            .await
-                            .map_err(RelayerError::AmqpError)?;
+                        Self::nack_deposit(dep.1).await?;
                     }
                 }
             }
@@ -200,5 +178,22 @@ impl<C: QueueTrait> Includer<C> {
             }
         }
         Ok(())
+    }
+
+    pub async fn nack_deposit(delivery : Delivery) -> Result<(), RelayerError>{
+        delivery
+            .nack(BasicNackOptions {
+                multiple: false,
+                requeue: false,
+            })
+            .await
+            .map_err(RelayerError::AmqpError)
+    }
+
+    pub async fn ack_deposit(delivery : Delivery) -> Result<(), RelayerError>{
+        delivery
+            .ack(BasicAckOptions::default())
+            .await
+            .map_err(RelayerError::AmqpError)
     }
 }
