@@ -174,7 +174,7 @@ impl<C: QueueTrait> Subscriber<C> {
         } else {
             debug!("last_offset updated successfully");
         }
-
+        debug!("{:?}", deposits);
         Ok(deposits)
     }
 
