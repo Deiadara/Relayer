@@ -115,17 +115,11 @@ impl<C: QueueTrait> Subscriber<C> {
         })
     }
 
-    pub async fn get_deposits(&mut self) -> Result<Vec<Deposit>, RelayerError> {
-        let mut cache = RedisCache {
-            connection: self.con.clone(),
-        };
-        let from_block = cache.get_last_offset("from_block").await?;
+    pub async fn get_deposits(&mut self, from_block : u64, to_block : u64) -> Result<Vec<Deposit>, RelayerError> {
+        if from_block >= to_block {
+            return Err(RelayerError::Other(String::from("No blocks to scan")));
+        }
         let mut deposits = Vec::new();
-        let to_block = self
-            .provider
-            .get_block_number()
-            .await
-            .map_err(|e| RelayerError::ProviderError(e.to_string()))?;
         let filter = Filter::new()
             .address(self.contract_address)
             .from_block(from_block + 1)
@@ -169,11 +163,6 @@ impl<C: QueueTrait> Subscriber<C> {
             deposits.push(Deposit { sender, amount });
         }
 
-        if let Err(e) = cache.set_last_offset("from_block", to_block).await {
-            error!("Failed to set last_offset: {:?}", e);
-        } else {
-            debug!("last_offset updated successfully");
-        }
         debug!("{:?}", deposits);
         Ok(deposits)
     }
@@ -189,7 +178,21 @@ impl<C: QueueTrait> Subscriber<C> {
     }
 
     async fn work(&mut self) -> Result<(), RelayerError> {
-        let deposits = self.get_deposits().await?;
+        let mut cache = RedisCache {
+            connection: self.con.clone(),
+        };
+        let from_block = cache.get_last_offset("from_block").await?;
+        let to_block = self
+            .provider
+            .get_block_number()
+            .await
+            .map_err(|e| RelayerError::ProviderError(e.to_string()))?;
+        let deposits = self.get_deposits(from_block,to_block).await?;
+        if let Err(e) = cache.set_last_offset("from_block", to_block).await {
+            error!("Failed to set last_offset: {:?}", e);
+        } else {
+            debug!("last_offset updated successfully");
+        }
         for dep in deposits {
             let serialized_deposit = serde_json::to_vec(&dep).map_err(RelayerError::SerdeError)?;
             info!("Event emitted from sender: {:?}", dep.sender);
@@ -204,6 +207,54 @@ impl<C: QueueTrait> Subscriber<C> {
             }
         }
         Ok(())
+    }
+}
+
+mod tests {
+    use crate::{queue, utils::get_src_contract_addr};
+
+    use super::*;
+    #[tokio::test]
+    async fn test_get_deposits_err() {
+        let src_rpc = "http://localhost:8545";
+        let rpc_url: Url = src_rpc.parse().unwrap();
+        let src_contract_address = get_src_contract_addr("../project_eth/data/deployments.json").unwrap();
+        unsafe {
+            std::env::set_var(
+                "DB_URL",
+                "redis://127.0.0.1/",
+            );
+        }
+        let queue_connection = queue::get_queue_connection().await.unwrap();
+
+        let mut sub = Subscriber::new(&rpc_url, src_contract_address, queue_connection)
+            .await
+            .unwrap();
+
+        let res = sub.get_deposits(4,3).await;
+        assert!(res.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_deposits() {
+        let src_rpc = "http://localhost:8545";
+        let rpc_url: Url = src_rpc.parse().unwrap();
+        let src_contract_address = get_src_contract_addr("../project_eth/data/deployments.json").unwrap();
+        unsafe {
+            std::env::set_var(
+                "DB_URL",
+                "redis://127.0.0.1/",
+            );
+        }
+        let queue_connection = queue::get_queue_connection().await.unwrap();
+
+        let mut sub = Subscriber::new(&rpc_url, src_contract_address, queue_connection)
+            .await
+            .unwrap();
+
+        let res = sub.get_deposits(0,10).await;
+        assert!(res.is_err());
+
     }
 }
 

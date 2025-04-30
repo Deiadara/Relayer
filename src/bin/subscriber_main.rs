@@ -2,7 +2,7 @@ use alloy::transports::http::reqwest::Url;
 use dotenv::dotenv;
 use eyre::Result;
 use relayer::queue;
-use relayer::subscriber;
+use relayer::subscriber::Subscriber;
 use relayer::utils::{get_src_contract_addr, setup_logging};
 use std::env;
 use tracing::debug;
@@ -21,7 +21,7 @@ async fn main() -> Result<()> {
 
     let queue_connection = queue::get_queue_connection().await?;
 
-    let mut sub = subscriber::Subscriber::new(&rpc_url, src_contract_address, queue_connection)
+    let mut sub = Subscriber::new(&rpc_url, src_contract_address, queue_connection)
         .await
         .unwrap();
 
