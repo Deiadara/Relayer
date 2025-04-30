@@ -156,12 +156,11 @@ impl<C: QueueTrait> Includer<C> {
                                 Ok(_) => {
                                     info!("Tokens minted succesfully!");
                                     Self::ack_deposit(dep.1).await?;
-
                                 }
                                 Err(e) => {
                                     error!("Couldn't verify minted log : {}", e);
                                     Self::nack_deposit(dep.1).await?;
-                                    return Err(RelayerError::Other(e.to_string()))
+                                    return Err(RelayerError::Other(e.to_string()));
                                 }
                             }
                         }
@@ -173,7 +172,7 @@ impl<C: QueueTrait> Includer<C> {
                     Err(e) => {
                         error!("Error minting : {:?}", e);
                         Self::nack_deposit(dep.1).await?;
-                        return Err(RelayerError::Other(e.to_string()))
+                        return Err(RelayerError::Other(e.to_string()));
                     }
                 }
             }
@@ -184,7 +183,7 @@ impl<C: QueueTrait> Includer<C> {
         Ok(())
     }
 
-    pub async fn nack_deposit(delivery : Delivery) -> Result<(), RelayerError>{
+    pub async fn nack_deposit(delivery: Delivery) -> Result<(), RelayerError> {
         delivery
             .nack(BasicNackOptions {
                 multiple: false,
@@ -194,7 +193,7 @@ impl<C: QueueTrait> Includer<C> {
             .map_err(RelayerError::AmqpError)
     }
 
-    pub async fn ack_deposit(delivery : Delivery) -> Result<(), RelayerError>{
+    pub async fn ack_deposit(delivery: Delivery) -> Result<(), RelayerError> {
         delivery
             .ack(BasicAckOptions::default())
             .await

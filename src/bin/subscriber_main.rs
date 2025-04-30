@@ -3,7 +3,7 @@ use dotenv::dotenv;
 use eyre::Result;
 use relayer::queue;
 use relayer::subscriber;
-use relayer::utils::{get_src_contract_addr,setup_logging};
+use relayer::utils::{get_src_contract_addr, setup_logging};
 use std::env;
 use tracing::debug;
 
@@ -24,8 +24,7 @@ async fn main() -> Result<()> {
     let mut sub = subscriber::Subscriber::new(&rpc_url, src_contract_address, queue_connection)
         .await
         .unwrap();
-    
+
     let _res = sub.run().await;
     Ok(())
-
 }

@@ -4,12 +4,10 @@ use mockall::automock;
 use mockall::predicate::eq;
 use tracing::debug;
 
-
 use lapin::{
     BasicProperties, Channel, Connection, ConnectionProperties, Consumer, options::*,
     types::FieldTable,
 };
-//use tracing::info;
 
 #[async_trait]
 pub trait QueueTrait {
@@ -21,7 +19,6 @@ pub trait QueueTrait {
 
 pub struct LapinConnection {
     channel: Channel,
-    //queue: Queue,
 }
 
 #[async_trait]
@@ -67,8 +64,6 @@ impl QueueTrait for LapinConnection {
 
 impl LapinConnection {
     pub async fn new() -> Result<Self, RelayerError> {
-        //tracing_subscriber::fmt::init();
-
         let addr =
             std::env::var("AMQP_ADDR").unwrap_or_else(|_| "amqp://127.0.0.1:5672/%2f".into());
 

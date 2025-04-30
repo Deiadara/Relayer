@@ -16,7 +16,7 @@ use mockall::predicate::*;
 use redis::{AsyncCommands, Client, aio::MultiplexedConnection}; // make connection pool at some point
 use serde::{Deserialize, Serialize};
 use std::{env, thread, time};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 type ProviderType = FillProvider<
     JoinFill<
         Identity,
@@ -42,18 +42,38 @@ pub struct Subscriber<C: QueueTrait> {
 #[cfg_attr(test, mockall::automock)]
 #[async_trait]
 pub trait CacheTrait {
-    async fn get_last_offset(&mut self, key: &str) -> redis::RedisResult<u64>; // block ,    needs to return number and work for any cache
-    async fn set_last_offset(&mut self, key: &str, value: u64) -> redis::RedisResult<()>;
+    async fn get_last_offset(&mut self, key: &str) -> Result<u64, RelayerError>;
+    async fn set_last_offset(&mut self, key: &str, value: u64) -> Result<(), RelayerError>;
 }
 
 pub struct RedisCache {
     pub connection: MultiplexedConnection,
 }
 
-// impl CacheTrait for RedisCache {
-//     fun1
-//     fun2
-// }
+#[async_trait]
+impl CacheTrait for RedisCache {
+    async fn get_last_offset(&mut self, key: &str) -> Result<u64, RelayerError> {
+        let mut from_block: u64 = 0;
+        let from_block_response: Option<u64> = self
+            .connection
+            .get(key)
+            .await
+            .map_err(|e| RelayerError::RedisError(e.to_string()))?;
+        if from_block_response.is_some() {
+            from_block = from_block_response.unwrap();
+        }
+        Ok(from_block)
+    }
+
+    async fn set_last_offset(&mut self, key: &str, value: u64) -> Result<(), RelayerError> {
+        let _res: () = self
+            .connection
+            .set(key, value)
+            .await
+            .map_err(|e| RelayerError::RedisError(e.to_string()))?;
+        Ok(())
+    }
+}
 
 // #[async_trait]
 // impl CacheTrait for MultiplexedConnection {
@@ -73,11 +93,15 @@ impl<C: QueueTrait> Subscriber<C> {
         rpc_url: &Url,
         contract_address: Address,
         queue_connection: C,
-    ) -> Result<Self> {
+    ) -> Result<Self, RelayerError> {
         let db_url = env::var("DB_URL").expect("DB_URL not set");
 
-        let client = Client::open(db_url)?;
-        let con = client.get_multiplexed_async_connection().await?;
+        let client: Client =
+            Client::open(db_url).map_err(|e| RelayerError::RedisError(e.to_string()))?;
+        let con: MultiplexedConnection = client
+            .get_multiplexed_async_connection()
+            .await
+            .map_err(|e| RelayerError::RedisError(e.to_string()))?;
 
         let event_sig = keccak256(DEPOSIT_EVENT_SIG);
         let provider: ProviderType = ProviderBuilder::new().on_http(rpc_url.clone());
@@ -92,16 +116,10 @@ impl<C: QueueTrait> Subscriber<C> {
     }
 
     pub async fn get_deposits(&mut self) -> Result<Vec<Deposit>, RelayerError> {
-        let mut from_block: u64 = 0;
-        // this is a function of RedisCache
-        let from_block_response: Option<u64> = self
-            .con
-            .get("from_block")
-            .await
-            .map_err(|e| RelayerError::RedisError(e.to_string()))?;
-        if from_block_response.is_some() {
-            from_block = from_block_response.unwrap();
-        }
+        let mut cache = RedisCache {
+            connection: self.con.clone(),
+        };
+        let from_block = cache.get_last_offset("from_block").await?;
         let mut deposits = Vec::new();
         let to_block = self
             .provider
@@ -151,12 +169,11 @@ impl<C: QueueTrait> Subscriber<C> {
             deposits.push(Deposit { sender, amount });
         }
 
-        let response: String = self
-            .con
-            .set("from_block", to_block)
-            .await
-            .map_err(|e| RelayerError::RedisError(e.to_string()))?;
-        debug!("Response: {}", response);
+        if let Err(e) = cache.set_last_offset("from_block", to_block).await {
+            error!("Failed to set last_offset: {:?}", e);
+        } else {
+            debug!("last_offset updated successfully");
+        }
 
         Ok(deposits)
     }
@@ -167,7 +184,7 @@ impl<C: QueueTrait> Subscriber<C> {
                 error!("Error: {:?}", e);
             }
             let two_sec = time::Duration::from_millis(2000);
-                    thread::sleep(two_sec);
+            thread::sleep(two_sec);
         }
     }
 
@@ -182,13 +199,12 @@ impl<C: QueueTrait> Subscriber<C> {
                 }
                 Err(e) => {
                     error!("Error processing deposit: {:?}", e);
-                    return Err(RelayerError::Other(e.to_string()))
+                    return Err(RelayerError::Other(e.to_string()));
                 }
             }
         }
         Ok(())
     }
- 
 }
 
 // mod tests {
@@ -208,8 +224,6 @@ impl<C: QueueTrait> Subscriber<C> {
 //         assert_eq!(queue_connection.stream, "relayer-stream-105");
 //     }
 // }
-
-
 
 //todo :
 // try to make contract throw error and check receipt and logs if they exist

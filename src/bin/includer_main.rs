@@ -3,7 +3,7 @@ use dotenv::dotenv;
 use eyre::Result;
 use relayer::includer;
 use relayer::queue;
-use relayer::utils::{get_dst_contract_addr,setup_logging};
+use relayer::utils::{get_dst_contract_addr, setup_logging};
 use std::env;
 
 const ADDRESS_PATH: &str = "../project_eth/data/deployments.json";
