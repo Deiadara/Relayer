@@ -9,8 +9,8 @@ use lapin::{
     BasicProperties, Channel, Connection, ConnectionProperties, Consumer, options::*,
     types::FieldTable,
 };
-
 #[async_trait]
+//#[cfg_attr(test, mockall::automock)]
 pub trait QueueTrait {
     type Consumer;
     async fn publish(&mut self, dep: &Vec<u8>) -> Result<(), RelayerError>;
@@ -98,7 +98,7 @@ impl LapinConnection {
 
 pub async fn get_queue_connection() -> Result<LapinConnection, RelayerError> {
     let queue_connection = LapinConnection::new().await?;
-    Ok(queue_connection)
+    Ok(queue_connection)    
 }
 // move to includer
 
@@ -111,7 +111,7 @@ mod tests {
         includer::{self, Includer},
         utils::get_dst_contract_addr,
     };
-
+    // move to integration tests this one check what the convention is
     use super::*;
     #[tokio::test]
     async fn test_publish_and_consume() {
@@ -128,7 +128,7 @@ mod tests {
                 .parse()
                 .unwrap(),
             amount: 42,
-        };
+       };
         let test_item = serde_json::to_vec(&test_deposit).unwrap();
         let resp = con.publish(&test_item).await;
         assert!(resp.is_ok());
@@ -142,13 +142,16 @@ mod tests {
         let incl = incl_res.unwrap();
         let res = incl.consume(&mut consumer).await;
         assert!(res.is_ok());
-        let tuple: (Deposit, lapin::message::Delivery) = res.unwrap();
+        let tuple = res.unwrap();
         let (received_deposit, delivery) = tuple;
         assert_eq!(received_deposit, test_deposit);
         let res = incl.ack_deposit(delivery).await;
         assert!(res.is_ok());
     }
 }
+
+
+//  make consumer and do consumer.next.await here, dont make an includer
 
 // mod tests {
 //     use super::*;

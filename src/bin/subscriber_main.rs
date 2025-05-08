@@ -1,8 +1,9 @@
+use alloy::providers::ProviderBuilder;
 use alloy::transports::http::reqwest::Url;
 use dotenv::dotenv;
 use eyre::Result;
 use relayer::queue;
-use relayer::subscriber::Subscriber;
+use relayer::subscriber::{Subscriber, RedisCache, ProviderType};
 use relayer::utils::{get_src_contract_addr, setup_logging};
 use std::env;
 use tracing::debug;
@@ -20,8 +21,12 @@ async fn main() -> Result<()> {
     debug!("Loaded deposit_address: {:?}", src_contract_address);
 
     let queue_connection = queue::get_queue_connection().await?;
+    let db_url = env::var("DB_URL").expect("DB_URL not set");
 
-    let mut sub = Subscriber::new(&rpc_url, src_contract_address, queue_connection)
+    let redis_connection = RedisCache::new(db_url).await?;
+    let provider: ProviderType = ProviderBuilder::new().on_http(rpc_url.clone());
+
+    let mut sub = Subscriber::new(src_contract_address, queue_connection, redis_connection, provider)
         .await
         .unwrap();
 

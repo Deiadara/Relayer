@@ -17,7 +17,7 @@ use redis::{AsyncCommands, Client, aio::MultiplexedConnection}; // make connecti
 use serde::{Deserialize, Serialize};
 use std::{env, thread, time};
 use tracing::{debug, error, info};
-type ProviderType = FillProvider<
+pub type ProviderType = FillProvider<
     JoinFill<
         Identity,
         JoinFill<GasFiller, JoinFill<BlobGasFiller, JoinFill<NonceFiller, ChainIdFiller>>>,
@@ -32,12 +32,12 @@ pub struct Deposit {
     pub amount: i32,
 }
 
-pub struct Subscriber<C: QueueTrait> {
+pub struct Subscriber<C: QueueTrait, R: CacheTrait> {
     pub contract_address: Address,
     pub provider: ProviderType,
     pub event_sig: FixedBytes<32>,
-    pub con: MultiplexedConnection,
     pub queue_connection: C,
+    pub cache_connection: R
 }
 #[cfg_attr(test, mockall::automock)]
 #[async_trait]
@@ -47,7 +47,21 @@ pub trait CacheTrait {
 }
 
 pub struct RedisCache {
-    pub connection: MultiplexedConnection,
+    connection: MultiplexedConnection,
+}
+
+impl RedisCache {
+    pub async fn new(db_url : String) -> Result<Self, RelayerError>{
+        let client =
+            Client::open(db_url).map_err(|e| RelayerError::RedisError(e.to_string()))?;
+        let connection = client
+            .get_multiplexed_async_connection()
+            .await
+            .map_err(|e| RelayerError::RedisError(e.to_string()))?;
+        Ok(RedisCache {
+            connection
+        })
+    }
 }
 
 #[async_trait]
@@ -75,43 +89,32 @@ impl CacheTrait for RedisCache {
     }
 }
 
-// #[async_trait]
-// impl CacheTrait for MultiplexedConnection {
-//     async fn get_last_offset(&mut self, key: &str) -> redis::RedisResult<u64> {
-//         AsyncCommands::get(self, key).await
-//     }
-
-//     async fn set_last_offset(&mut self, key: &str, value: u64) -> redis::RedisResult<()> {
-//         AsyncCommands::set(self, key, value).await
-//     }
-// }
-
 const DEPOSIT_EVENT_SIG: &str = "Deposited(address,string)";
 
-impl<C: QueueTrait> Subscriber<C> {
+impl<C: QueueTrait, R: CacheTrait> Subscriber<C,R> {
     pub async fn new(
-        rpc_url: &Url,
         contract_address: Address,
         queue_connection: C,
+        cache_connection : R,
+        provider : ProviderType
     ) -> Result<Self, RelayerError> {
-        let db_url = env::var("DB_URL").expect("DB_URL not set");
+        // let db_url = env::var("DB_URL").expect("DB_URL not set");
 
-        let client: Client =
-            Client::open(db_url).map_err(|e| RelayerError::RedisError(e.to_string()))?;
-        let con: MultiplexedConnection = client
-            .get_multiplexed_async_connection()
-            .await
-            .map_err(|e| RelayerError::RedisError(e.to_string()))?;
-
+        // let client: Client =
+        //     Client::open(db_url).map_err(|e| RelayerError::RedisError(e.to_string()))?;
+        // let con: MultiplexedConnection = client
+        //     .get_multiplexed_async_connection()
+        //     .await
+        //     .map_err(|e| RelayerError::RedisError(e.to_string()))?;
+        
         let event_sig = keccak256(DEPOSIT_EVENT_SIG);
-        let provider: ProviderType = ProviderBuilder::new().on_http(rpc_url.clone());
-
+        // .on_mocked_client
         Ok(Self {
             contract_address,
             provider,
             event_sig,
-            con,
             queue_connection,
+            cache_connection
         })
     }
 
@@ -178,17 +181,14 @@ impl<C: QueueTrait> Subscriber<C> {
     }
 
     async fn work(&mut self) -> Result<(), RelayerError> {
-        let mut cache = RedisCache {
-            connection: self.con.clone(),
-        };
-        let from_block = cache.get_last_offset("from_block").await?;
+        let from_block = self.cache_connection.get_last_offset("from_block").await?;
         let to_block = self
             .provider
             .get_block_number()
             .await
             .map_err(|e| RelayerError::ProviderError(e.to_string()))?;
         let deposits = self.get_deposits(from_block,to_block).await?;
-        if let Err(e) = cache.set_last_offset("from_block", to_block).await {
+        if let Err(e) = self.cache_connection.set_last_offset("from_block", to_block).await {
             error!("Failed to set last_offset: {:?}", e);
         } else {
             debug!("last_offset updated successfully");
@@ -211,13 +211,14 @@ impl<C: QueueTrait> Subscriber<C> {
 }
 
 mod tests {
+    use alloy::providers::mock::Asserter;
+
     use crate::{queue, utils::get_src_contract_addr};
 
     use super::*;
     #[tokio::test]
     async fn test_get_deposits_err() {
         let src_rpc = "http://localhost:8545";
-        let rpc_url: Url = src_rpc.parse().unwrap();
         let src_contract_address = get_src_contract_addr("../project_eth/data/deployments.json").unwrap();
         unsafe {
             std::env::set_var(
@@ -225,9 +226,11 @@ mod tests {
                 "redis://127.0.0.1/",
             );
         }
+        let asserter = Asserter::new();
+        let provider: ProviderType = ProviderBuilder::new().on_mocked_client(asserter);
         let queue_connection = queue::get_queue_connection().await.unwrap();
-
-        let mut sub = Subscriber::new(&rpc_url, src_contract_address, queue_connection)
+        let cache_connection = MockCacheTrait::new();
+        let mut sub = Subscriber::new(src_contract_address, queue_connection, cache_connection, provider)
             .await
             .unwrap();
 
@@ -237,8 +240,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_deposits() {
-        let src_rpc = "http://localhost:8545";
-        let rpc_url: Url = src_rpc.parse().unwrap();
         let src_contract_address = get_src_contract_addr("../project_eth/data/deployments.json").unwrap();
         unsafe {
             std::env::set_var(
@@ -246,17 +247,22 @@ mod tests {
                 "redis://127.0.0.1/",
             );
         }
+        let asserter = Asserter::new();
+        let provider: ProviderType = ProviderBuilder::new().on_mocked_client(asserter);
         let queue_connection = queue::get_queue_connection().await.unwrap();
+        let cache_connection = MockCacheTrait::new();
 
-        let mut sub = Subscriber::new(&rpc_url, src_contract_address, queue_connection)
+        let mut sub = Subscriber::new(src_contract_address, queue_connection,cache_connection, provider)
             .await
             .unwrap();
 
-        let res = sub.get_deposits(0,10).await;
+        let res = sub.get_deposits(0,100).await;
         assert!(res.is_err());
 
     }
 }
+
+// make a setup tests function that returns the common code e.g. asserter etc
 
 // mod tests {
 //     use super::*;
@@ -285,3 +291,5 @@ mod tests {
 // make push testable
 
 // includer : mock contract and provider and see that they re called with the correct arguments
+
+// check with mockall that functions are called with the correct arguments and what they return is what is expected
