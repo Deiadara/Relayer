@@ -210,26 +210,26 @@ impl<C: QueueTrait, R: CacheTrait> Subscriber<C,R> {
     }
 }
 
+#[cfg(test)]
 mod tests {
     use alloy::providers::mock::Asserter;
 
-    use crate::{queue, utils::get_src_contract_addr};
+    use crate::{queue::{self, LapinConnection}, utils::get_src_contract_addr};
 
     use super::*;
-    #[tokio::test]
-    async fn test_get_deposits_err() {
-        let src_rpc = "http://localhost:8545";
-        let src_contract_address = get_src_contract_addr("../project_eth/data/deployments.json").unwrap();
-        unsafe {
-            std::env::set_var(
-                "DB_URL",
-                "redis://127.0.0.1/",
-            );
-        }
+
+    async fn setup_tests() -> (ProviderType, LapinConnection, MockCacheTrait){
         let asserter = Asserter::new();
         let provider: ProviderType = ProviderBuilder::new().on_mocked_client(asserter);
         let queue_connection = queue::get_queue_connection().await.unwrap();
         let cache_connection = MockCacheTrait::new();
+        (provider, queue_connection, cache_connection)
+    }
+
+    #[tokio::test]
+    async fn test_get_deposits_err() {
+        let src_contract_address = get_src_contract_addr("../project_eth/data/deployments.json").unwrap();
+        let (provider, queue_connection, cache_connection) = setup_tests().await;
         let mut sub = Subscriber::new(src_contract_address, queue_connection, cache_connection, provider)
             .await
             .unwrap();
@@ -241,18 +241,8 @@ mod tests {
     #[tokio::test]
     async fn test_get_deposits() {
         let src_contract_address = get_src_contract_addr("../project_eth/data/deployments.json").unwrap();
-        unsafe {
-            std::env::set_var(
-                "DB_URL",
-                "redis://127.0.0.1/",
-            );
-        }
-        let asserter = Asserter::new();
-        let provider: ProviderType = ProviderBuilder::new().on_mocked_client(asserter);
-        let queue_connection = queue::get_queue_connection().await.unwrap();
-        let cache_connection = MockCacheTrait::new();
-
-        let mut sub = Subscriber::new(src_contract_address, queue_connection,cache_connection, provider)
+        let (provider, queue_connection, cache_connection) = setup_tests().await;
+        let mut sub = Subscriber::new(src_contract_address, queue_connection, cache_connection, provider)
             .await
             .unwrap();
 
@@ -262,7 +252,6 @@ mod tests {
     }
 }
 
-// make a setup tests function that returns the common code e.g. asserter etc
 
 // mod tests {
 //     use super::*;

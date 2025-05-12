@@ -3,7 +3,7 @@ use alloy::transports::http::reqwest::Url;
 use dotenv::dotenv;
 use eyre::Result;
 use relayer::queue;
-use relayer::subscriber::{Subscriber, RedisCache, ProviderType};
+use relayer::subscriber::{ProviderType, RedisCache, Subscriber};
 use relayer::utils::{get_src_contract_addr, setup_logging};
 use std::env;
 use tracing::debug;
@@ -26,9 +26,14 @@ async fn main() -> Result<()> {
     let redis_connection = RedisCache::new(db_url).await?;
     let provider: ProviderType = ProviderBuilder::new().on_http(rpc_url.clone());
 
-    let mut sub = Subscriber::new(src_contract_address, queue_connection, redis_connection, provider)
-        .await
-        .unwrap();
+    let mut sub = Subscriber::new(
+        src_contract_address,
+        queue_connection,
+        redis_connection,
+        provider,
+    )
+    .await
+    .unwrap();
 
     let _res = sub.run().await;
     Ok(())

@@ -106,6 +106,7 @@ mod tests {
     use std::env;
 
     use alloy::transports::http::reqwest::Url;
+    use futures_lite::StreamExt;
 
     use crate::{
         includer::{self, Includer},
@@ -147,6 +148,34 @@ mod tests {
         assert_eq!(received_deposit, test_deposit);
         let res = incl.ack_deposit(delivery).await;
         assert!(res.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_publish_and_consume_without_includer() {
+        const ADDRESS_PATH: &str = "../project_eth/data/deployments.json";
+        unsafe {
+            std::env::set_var(
+                "PRIVATE_KEY",
+                "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+            );
+        }
+        let mut con = get_queue_connection().await.unwrap();
+        let test_deposit = Deposit {
+            sender: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+                .parse()
+                .unwrap(),
+            amount: 42,
+       };
+        let test_item = serde_json::to_vec(&test_deposit).unwrap();
+        let resp = con.publish(&test_item).await;
+        assert!(resp.is_ok());
+        let mut consumer = con.consumer().await.unwrap();
+        let res = consumer.next().await.unwrap();
+        assert!(res.is_ok());
+        let delivery = res.unwrap();
+        let deposit = serde_json::from_slice::<Deposit>(&delivery.data).unwrap();
+        assert_eq!(deposit, test_deposit);
+
     }
 }
 
