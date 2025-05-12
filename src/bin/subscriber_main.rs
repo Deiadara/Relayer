@@ -20,7 +20,7 @@ async fn main() -> Result<()> {
     let src_contract_address = get_src_contract_addr(ADDRESS_PATH)?;
     debug!("Loaded deposit_address: {:?}", src_contract_address);
 
-    let queue_connection = queue::get_queue_connection().await?;
+    let queue_connection = queue::get_queue_connection(false).await?;
     let db_url = env::var("DB_URL").expect("DB_URL not set");
 
     let redis_connection = RedisCache::new(db_url).await?;

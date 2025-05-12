@@ -20,6 +20,7 @@ pub trait QueueTrait {
 
 pub struct LapinConnection {
     channel: Channel,
+    queue_name: String
 }
 
 #[async_trait]
@@ -31,7 +32,7 @@ impl QueueTrait for LapinConnection {
             .channel
             .basic_publish(
                 "",
-                "relayer",
+                &self.queue_name,
                 BasicPublishOptions::default(),
                 serialized_item,
                 BasicProperties::default(),
@@ -51,7 +52,7 @@ impl QueueTrait for LapinConnection {
         let consumer = self
             .channel
             .basic_consume(
-                "relayer",
+                &self.queue_name,
                 "my_consumer",
                 BasicConsumeOptions::default(),
                 FieldTable::default(),
@@ -62,7 +63,7 @@ impl QueueTrait for LapinConnection {
 }
 
 impl LapinConnection {
-    pub async fn new() -> Result<Self, RelayerError> {
+    pub async fn new(is_test : bool) -> Result<Self, RelayerError> {
         let addr =
             std::env::var("AMQP_ADDR").unwrap_or_else(|_| "amqp://127.0.0.1:5672/%2f".into());
 
@@ -80,24 +81,26 @@ impl LapinConnection {
         channel
             .confirm_select(ConfirmSelectOptions { nowait: false })
             .await?;
+        let queue_name = if is_test { "test_relayer" } else { "relayer" };
 
         let _queue = channel
-            .queue_declare(
-                "relayer",
-                QueueDeclareOptions::default(),
-                FieldTable::default(),
-            )
-            .await
-            .map_err(|e| RelayerError::Other(e.to_string()))?;
+        .queue_declare(
+            queue_name,
+            QueueDeclareOptions::default(),
+            FieldTable::default(),
+        )
+        .await
+        .map_err(|e| RelayerError::Other(e.to_string()))?;
 
         Ok(LapinConnection {
-            channel, /* ,queue*/
+            channel,
+            queue_name : queue_name.to_string()
         })
     }
 }
 
-pub async fn get_queue_connection() -> Result<LapinConnection, RelayerError> {
-    let queue_connection = LapinConnection::new().await?;
+pub async fn get_queue_connection(is_test : bool) -> Result<LapinConnection, RelayerError> {
+    let queue_connection = LapinConnection::new(is_test).await?;
     Ok(queue_connection)    
 }
 // move to includer
@@ -123,7 +126,7 @@ mod tests {
                 "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
             );
         }
-        let mut con = get_queue_connection().await.unwrap();
+        let mut con = get_queue_connection(true).await.unwrap();
         let test_deposit = Deposit {
             sender: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
                 .parse()
@@ -159,7 +162,7 @@ mod tests {
                 "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
             );
         }
-        let mut con = get_queue_connection().await.unwrap();
+        let mut con = get_queue_connection(true).await.unwrap();
         let test_deposit = Deposit {
             sender: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
                 .parse()
@@ -179,8 +182,6 @@ mod tests {
     }
 }
 
-
-//  make consumer and do consumer.next.await here, dont make an includer
 
 // mod tests {
 //     use super::*;

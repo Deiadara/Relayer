@@ -16,7 +16,7 @@ async fn main() -> Result<()> {
     let dst_rpc = env::var("DST_RPC").expect("DST_RPC not set");
     let rpc_url_dst: Url = dst_rpc.parse()?;
     let dst_contract_address = get_dst_contract_addr(ADDRESS_PATH)?;
-    let queue_connection = queue::get_queue_connection().await?;
+    let queue_connection = queue::get_queue_connection(false).await?;
 
     let mut incl =
         includer::Includer::new(&rpc_url_dst, dst_contract_address, queue_connection.clone())

@@ -7,7 +7,7 @@ use alloy::{
         Identity, Provider, ProviderBuilder, RootProvider,
         fillers::{BlobGasFiller, ChainIdFiller, FillProvider, GasFiller, JoinFill, NonceFiller},
     },
-    rpc::types::Filter,
+    rpc::types::{Filter,Log},
     transports::http::reqwest::Url,
 };
 use async_trait::async_trait;
@@ -122,7 +122,7 @@ impl<C: QueueTrait, R: CacheTrait> Subscriber<C,R> {
         if from_block >= to_block {
             return Err(RelayerError::Other(String::from("No blocks to scan")));
         }
-        let mut deposits = Vec::new();
+        let deposits = Vec::new();
         let filter = Filter::new()
             .address(self.contract_address)
             .from_block(from_block + 1)
@@ -139,6 +139,13 @@ impl<C: QueueTrait, R: CacheTrait> Subscriber<C,R> {
 
         info!("Got {} logs", logs.len());
 
+        let deposits_res = self.push_deposits(logs,deposits).await?;
+
+        debug!("{:?}", deposits_res);
+        Ok(deposits_res)
+    }
+
+    pub async fn push_deposits(&self,logs:Vec<Log>,mut deposits : Vec<Deposit>) -> Result<Vec<Deposit>, RelayerError> {
         for log in logs {
             println!("Transfer event: {log:?}");
             let topics = log.topics();
@@ -165,8 +172,6 @@ impl<C: QueueTrait, R: CacheTrait> Subscriber<C,R> {
 
             deposits.push(Deposit { sender, amount });
         }
-
-        debug!("{:?}", deposits);
         Ok(deposits)
     }
 
@@ -221,7 +226,7 @@ mod tests {
     async fn setup_tests() -> (ProviderType, LapinConnection, MockCacheTrait){
         let asserter = Asserter::new();
         let provider: ProviderType = ProviderBuilder::new().on_mocked_client(asserter);
-        let queue_connection = queue::get_queue_connection().await.unwrap();
+        let queue_connection = queue::get_queue_connection(true).await.unwrap();
         let cache_connection = MockCacheTrait::new();
         (provider, queue_connection, cache_connection)
     }
