@@ -1,21 +1,22 @@
 use crate::errors::RelayerError;
 use crate::queue::QueueTrait;
+use crate::utils::push_deposits;
 use alloy::{
     dyn_abi::{DynSolType, DynSolValue},
     primitives::{Address, B256, FixedBytes, keccak256},
     providers::{
-        Identity, Provider, ProviderBuilder, RootProvider,
+        Identity, Provider, RootProvider,
         fillers::{BlobGasFiller, ChainIdFiller, FillProvider, GasFiller, JoinFill, NonceFiller},
     },
-    rpc::types::{Filter,Log},
-    transports::http::reqwest::Url,
+    rpc::types::{Filter, Log},
 };
 use async_trait::async_trait;
 use eyre::Result;
+use lapin::Queue;
 use mockall::predicate::*;
 use redis::{AsyncCommands, Client, aio::MultiplexedConnection}; // make connection pool at some point
 use serde::{Deserialize, Serialize};
-use std::{env, thread, time};
+use std::{thread, time};
 use tracing::{debug, error, info};
 pub type ProviderType = FillProvider<
     JoinFill<
@@ -37,7 +38,7 @@ pub struct Subscriber<C: QueueTrait, R: CacheTrait> {
     pub provider: ProviderType,
     pub event_sig: FixedBytes<32>,
     pub queue_connection: C,
-    pub cache_connection: R
+    pub cache_connection: R,
 }
 #[cfg_attr(test, mockall::automock)]
 #[async_trait]
@@ -51,16 +52,13 @@ pub struct RedisCache {
 }
 
 impl RedisCache {
-    pub async fn new(db_url : String) -> Result<Self, RelayerError>{
-        let client =
-            Client::open(db_url).map_err(|e| RelayerError::RedisError(e.to_string()))?;
+    pub async fn new(db_url: String) -> Result<Self, RelayerError> {
+        let client = Client::open(db_url).map_err(|e| RelayerError::RedisError(e.to_string()))?;
         let connection = client
             .get_multiplexed_async_connection()
             .await
             .map_err(|e| RelayerError::RedisError(e.to_string()))?;
-        Ok(RedisCache {
-            connection
-        })
+        Ok(RedisCache { connection })
     }
 }
 
@@ -91,22 +89,13 @@ impl CacheTrait for RedisCache {
 
 const DEPOSIT_EVENT_SIG: &str = "Deposited(address,string)";
 
-impl<C: QueueTrait, R: CacheTrait> Subscriber<C,R> {
+impl<C: QueueTrait, R: CacheTrait> Subscriber<C, R> {
     pub async fn new(
         contract_address: Address,
         queue_connection: C,
-        cache_connection : R,
-        provider : ProviderType
+        cache_connection: R,
+        provider: ProviderType,
     ) -> Result<Self, RelayerError> {
-        // let db_url = env::var("DB_URL").expect("DB_URL not set");
-
-        // let client: Client =
-        //     Client::open(db_url).map_err(|e| RelayerError::RedisError(e.to_string()))?;
-        // let con: MultiplexedConnection = client
-        //     .get_multiplexed_async_connection()
-        //     .await
-        //     .map_err(|e| RelayerError::RedisError(e.to_string()))?;
-        
         let event_sig = keccak256(DEPOSIT_EVENT_SIG);
         // .on_mocked_client
         Ok(Self {
@@ -114,11 +103,15 @@ impl<C: QueueTrait, R: CacheTrait> Subscriber<C,R> {
             provider,
             event_sig,
             queue_connection,
-            cache_connection
+            cache_connection,
         })
     }
 
-    pub async fn get_deposits(&mut self, from_block : u64, to_block : u64) -> Result<Vec<Deposit>, RelayerError> {
+    pub async fn get_deposits(
+        &mut self,
+        from_block: u64,
+        to_block: u64,
+    ) -> Result<Vec<Deposit>, RelayerError> {
         if from_block >= to_block {
             return Err(RelayerError::Other(String::from("No blocks to scan")));
         }
@@ -139,13 +132,16 @@ impl<C: QueueTrait, R: CacheTrait> Subscriber<C,R> {
 
         info!("Got {} logs", logs.len());
 
-        let deposits_res = self.push_deposits(logs,deposits).await?;
+        let deposits_res = push_deposits(logs, deposits).await?;
 
         debug!("{:?}", deposits_res);
         Ok(deposits_res)
     }
 
-    pub async fn push_deposits(&self,logs:Vec<Log>,mut deposits : Vec<Deposit>) -> Result<Vec<Deposit>, RelayerError> {
+    pub async fn push_deposits(
+        logs: Vec<Log>,
+        mut deposits: Vec<Deposit>,
+    ) -> Result<Vec<Deposit>, RelayerError> {
         for log in logs {
             println!("Transfer event: {log:?}");
             let topics = log.topics();
@@ -192,8 +188,12 @@ impl<C: QueueTrait, R: CacheTrait> Subscriber<C,R> {
             .get_block_number()
             .await
             .map_err(|e| RelayerError::ProviderError(e.to_string()))?;
-        let deposits = self.get_deposits(from_block,to_block).await?;
-        if let Err(e) = self.cache_connection.set_last_offset("from_block", to_block).await {
+        let deposits = self.get_deposits(from_block, to_block).await?;
+        if let Err(e) = self
+            .cache_connection
+            .set_last_offset("from_block", to_block)
+            .await
+        {
             error!("Failed to set last_offset: {:?}", e);
         } else {
             debug!("last_offset updated successfully");
@@ -217,13 +217,16 @@ impl<C: QueueTrait, R: CacheTrait> Subscriber<C,R> {
 
 #[cfg(test)]
 mod tests {
-    use alloy::providers::mock::Asserter;
+    use alloy::providers::{ProviderBuilder, mock::Asserter};
 
-    use crate::{queue::{self, LapinConnection}, utils::get_src_contract_addr};
+    use crate::{
+        queue::{self, LapinConnection},
+        utils::get_src_contract_addr,
+    };
 
     use super::*;
 
-    async fn setup_tests() -> (ProviderType, LapinConnection, MockCacheTrait){
+    async fn setup_tests() -> (ProviderType, LapinConnection, MockCacheTrait) {
         let asserter = Asserter::new();
         let provider: ProviderType = ProviderBuilder::new().on_mocked_client(asserter);
         let queue_connection = queue::get_queue_connection(true).await.unwrap();
@@ -233,30 +236,40 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_deposits_err() {
-        let src_contract_address = get_src_contract_addr("../project_eth/data/deployments.json").unwrap();
+        let src_contract_address =
+            get_src_contract_addr("../project_eth/data/deployments.json").unwrap();
         let (provider, queue_connection, cache_connection) = setup_tests().await;
-        let mut sub = Subscriber::new(src_contract_address, queue_connection, cache_connection, provider)
-            .await
-            .unwrap();
+        let mut sub = Subscriber::new(
+            src_contract_address,
+            queue_connection,
+            cache_connection,
+            provider,
+        )
+        .await
+        .unwrap();
 
-        let res = sub.get_deposits(4,3).await;
+        let res = sub.get_deposits(4, 3).await;
         assert!(res.is_err());
     }
 
     #[tokio::test]
     async fn test_get_deposits() {
-        let src_contract_address = get_src_contract_addr("../project_eth/data/deployments.json").unwrap();
+        let src_contract_address =
+            get_src_contract_addr("../project_eth/data/deployments.json").unwrap();
         let (provider, queue_connection, cache_connection) = setup_tests().await;
-        let mut sub = Subscriber::new(src_contract_address, queue_connection, cache_connection, provider)
-            .await
-            .unwrap();
+        let mut sub = Subscriber::new(
+            src_contract_address,
+            queue_connection,
+            cache_connection,
+            provider,
+        )
+        .await
+        .unwrap();
 
-        let res = sub.get_deposits(0,100).await;
+        let res = sub.get_deposits(0, 100).await;
         assert!(res.is_err());
-
     }
 }
-
 
 // mod tests {
 //     use super::*;

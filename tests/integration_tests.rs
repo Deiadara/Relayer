@@ -1,9 +1,8 @@
-use relayer::queue::{get_queue_connection, QueueTrait};
+use alloy::transports::http::reqwest::Url;
+use relayer::includer;
+use relayer::queue::{QueueTrait, get_queue_connection};
 use relayer::subscriber::Deposit;
 use relayer::utils::get_dst_contract_addr;
-use relayer::includer;
-use alloy::transports::http::reqwest::Url;
-
 
 #[tokio::test]
 async fn test_publish_and_consume() {
@@ -20,7 +19,7 @@ async fn test_publish_and_consume() {
             .parse()
             .unwrap(),
         amount: 42,
-   };
+    };
     let test_item = serde_json::to_vec(&test_deposit).unwrap();
     let resp = con.publish(&test_item).await;
     assert!(resp.is_ok());
@@ -28,8 +27,7 @@ async fn test_publish_and_consume() {
     let dst_rpc = "http://localhost:8546";
     let rpc_url_dst: Url = dst_rpc.parse().unwrap();
     let dst_contract_address = get_dst_contract_addr(ADDRESS_PATH).unwrap();
-    let incl_res =
-        includer::Includer::new(&rpc_url_dst, dst_contract_address, con.clone()).await;
+    let incl_res = includer::Includer::new(&rpc_url_dst, dst_contract_address, con.clone()).await;
     assert!(incl_res.is_ok());
     let incl = incl_res.unwrap();
     let res = incl.consume(&mut consumer).await;

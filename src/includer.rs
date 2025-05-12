@@ -100,26 +100,22 @@ impl<C: QueueTrait> Includer<C> {
         match consumer.next().await {
             None => {
                 warn!("Stream Ended");
-                return Err(RelayerError::Other(
+                Err(RelayerError::Other(
                     "Consumer stream ended unexpectedly".into(),
-                ));
+                ))
             }
-            Some(Err(e)) => {
-                return Err(RelayerError::AmqpError(e));
-            }
+            Some(Err(e)) => Err(RelayerError::AmqpError(e)),
             Some(Ok(delivery)) => match serde_json::from_slice::<Deposit>(&delivery.data) {
                 Ok(deposit) => {
                     debug!(
                         "Got deposit from {:?}, amount {}",
                         deposit.sender, deposit.amount
                     );
-                    return Ok((deposit, delivery));
+                    Ok((deposit, delivery))
                 }
-                Err(_) => {
-                    return Err(RelayerError::Other(String::from(
-                        "Failed to parse Deposit, skipping...",
-                    )));
-                }
+                Err(_) => Err(RelayerError::Other(String::from(
+                    "Failed to parse Deposit, skipping...",
+                ))),
             },
         }
     }

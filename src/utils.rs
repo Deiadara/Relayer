@@ -1,7 +1,11 @@
 use crate::errors::RelayerError;
+use crate::subscriber::Deposit;
 use alloy::primitives::Address;
 use alloy::primitives::keccak256;
+use alloy::rpc::types::Log;
 use alloy::rpc::types::eth::TransactionReceipt;
+use alloy_dyn_abi::DynSolType;
+use alloy_dyn_abi::DynSolValue;
 use eyre::Result;
 use serde_json::Value;
 use std::fs;
@@ -67,6 +71,39 @@ pub fn verify_minted_log(receipt: &TransactionReceipt) -> Result<(), RelayerErro
     Ok(())
 }
 
+pub async fn push_deposits(
+    logs: Vec<Log>,
+    mut deposits: Vec<Deposit>,
+) -> Result<Vec<Deposit>, RelayerError> {
+    for log in logs {
+        println!("Transfer event: {log:?}");
+        let topics = log.topics();
+        let raw_topic = topics.get(1).expect("Expected at least 2 topics");
+
+        let topic_bytes = raw_topic.as_ref();
+
+        let decoded = DynSolType::Address.abi_decode(topic_bytes)?;
+        let sender = match decoded {
+            DynSolValue::Address(addr) => addr,
+            _ => return Err(RelayerError::NoAddress),
+        };
+
+        let raw_data = log.data().data.clone();
+
+        let decoded = DynSolType::String.abi_decode(&raw_data.clone())?;
+
+        let amount_str = match decoded {
+            DynSolValue::String(s) => s,
+            _ => return Err(RelayerError::NotString),
+        };
+
+        let amount = amount_str.parse::<i32>().unwrap();
+
+        deposits.push(Deposit { sender, amount });
+    }
+    Ok(deposits)
+}
+
 pub fn get_src_contract_addr(addr_path: &str) -> Result<Address, RelayerError> {
     let contract_address = Deployments::from_file(addr_path)?;
     Ok(contract_address.deposit)
@@ -78,8 +115,15 @@ pub fn get_dst_contract_addr(addr_path: &str) -> Result<Address, RelayerError> {
 }
 
 mod tests {
+    use std::default;
+
+    use alloy::primitives::LogData;
+
     use super::*;
     use crate::errors::RelayerError;
+    use alloy::primitives::{Address, B256, Bytes, Log as RawLog};
+    use alloy::rpc::types::Log as RpcLog;
+    use alloy_dyn_abi::{DynSolType, DynSolValue};
 
     #[test]
     fn test_get_src_contract_addr() {
@@ -168,5 +212,122 @@ mod tests {
         let json: Value = serde_json::from_str(&json_str).unwrap();
         let err = deployments_from_json(json).unwrap_err();
         assert!(matches!(err, RelayerError::FromHexError(_)));
+    }
+
+    #[tokio::test]
+    async fn test_push_deposits() {
+        let sender: Address = "0x1111111111111111111111111111111111111111"
+            .parse()
+            .unwrap();
+        let sender2: Address = "0x1111111111111111111111111111111111111112"
+            .parse()
+            .unwrap();
+
+        let topic0 = B256::from(keccak256("Deposited(address,string)"));
+        let topic1_bytes = DynSolValue::Address(sender).abi_encode();
+        let topic1_bytes_2 = DynSolValue::Address(sender2).abi_encode();
+        let topic1_2 = B256::from_slice(&topic1_bytes_2);
+
+        let topic1 = B256::from_slice(&topic1_bytes);
+        let raw_data = DynSolValue::String("42".to_string()).abi_encode();
+        let data_bytes: Bytes = raw_data.into();
+
+        let log_data = LogData::new_unchecked(vec![topic0, topic1], data_bytes.clone());
+        let log_data_2 = LogData::new_unchecked(vec![topic0, topic1_2], data_bytes.clone());
+        let primitive: RawLog<LogData> = RawLog {
+            address: Address::default(),
+            data: log_data,
+        };
+
+        let primitive_2: RawLog<LogData> = RawLog {
+            address: Address::default(),
+            data: log_data_2,
+        };
+
+        let rpc_log: RpcLog<LogData> = RpcLog {
+            inner: primitive,
+            block_hash: None,
+            block_number: None,
+            block_timestamp: None,
+            transaction_hash: None,
+            transaction_index: None,
+            log_index: None,
+            removed: false,
+        };
+
+        let rpc_log_2: RpcLog<LogData> = RpcLog {
+            inner: primitive_2,
+            block_hash: None,
+            block_number: None,
+            block_timestamp: None,
+            transaction_hash: None,
+            transaction_index: None,
+            log_index: None,
+            removed: false,
+        };
+
+        let deposits = push_deposits(vec![rpc_log, rpc_log_2], Vec::new())
+            .await
+            .unwrap();
+
+        assert_eq!(deposits.len(), 2);
+        assert_eq!(deposits[0].sender, sender);
+        assert_eq!(deposits[1].sender, sender2);
+        assert_eq!(deposits[0].amount, 42);
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "Expected at least 2 topics")]
+    async fn test_push_deposits_missing_topic1_panics() {
+        // log with only topic0
+        let topic0 = B256::from(keccak256("Deposited(address,string)"));
+        let data_bytes = Bytes::from_static(&[0u8; 0]); // empty, won't get that far
+        let log_data = LogData::new_unchecked(vec![topic0], data_bytes);
+        let primitive = RawLog {
+            address: Address::default(),
+            data: log_data,
+        };
+        let rpc_log = RpcLog {
+            inner: primitive,
+            block_hash: None,
+            block_number: None,
+            block_timestamp: None,
+            transaction_hash: None,
+            transaction_index: None,
+            log_index: None,
+            removed: false,
+        };
+        // should panic here
+        let _ = push_deposits(vec![rpc_log], Vec::new()).await;
+    }
+
+    #[tokio::test]
+    async fn test_push_deposits_bad_data_returns_abi_error() {
+        let sender: Address = Address::default();
+        let topic0 = B256::from(keccak256("Deposited(address,string)"));
+        let topic1_bytes = DynSolValue::Address(sender).abi_encode();
+        let topic1 = B256::from_slice(&topic1_bytes);
+
+        // Invalid string data
+        let bad_data = Bytes::from_static(&[0xde, 0xad, 0xbe, 0xef]);
+        let log_data = LogData::new_unchecked(vec![topic0, topic1], bad_data);
+        let primitive = RawLog {
+            address: Address::default(),
+            data: log_data,
+        };
+        let rpc_log = RpcLog {
+            inner: primitive,
+            block_hash: None,
+            block_number: None,
+            block_timestamp: None,
+            transaction_hash: None,
+            transaction_index: None,
+            log_index: None,
+            removed: false,
+        };
+
+        // Should produce ABIerror
+        let err = push_deposits(vec![rpc_log], Vec::new()).await.unwrap_err();
+        assert!(matches!(err, RelayerError::AbiError(_)));
     }
 }

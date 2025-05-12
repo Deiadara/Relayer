@@ -1,5 +1,4 @@
 use crate::errors::RelayerError;
-use crate::subscriber::Deposit;
 use async_trait::async_trait;
 use mockall::automock;
 use mockall::predicate::eq;
@@ -20,7 +19,7 @@ pub trait QueueTrait {
 
 pub struct LapinConnection {
     channel: Channel,
-    queue_name: String
+    queue_name: String,
 }
 
 #[async_trait]
@@ -63,7 +62,7 @@ impl QueueTrait for LapinConnection {
 }
 
 impl LapinConnection {
-    pub async fn new(is_test : bool) -> Result<Self, RelayerError> {
+    pub async fn new(is_test: bool) -> Result<Self, RelayerError> {
         let addr =
             std::env::var("AMQP_ADDR").unwrap_or_else(|_| "amqp://127.0.0.1:5672/%2f".into());
 
@@ -84,24 +83,24 @@ impl LapinConnection {
         let queue_name = if is_test { "test_relayer" } else { "relayer" };
 
         let _queue = channel
-        .queue_declare(
-            queue_name,
-            QueueDeclareOptions::default(),
-            FieldTable::default(),
-        )
-        .await
-        .map_err(|e| RelayerError::Other(e.to_string()))?;
+            .queue_declare(
+                queue_name,
+                QueueDeclareOptions::default(),
+                FieldTable::default(),
+            )
+            .await
+            .map_err(|e| RelayerError::Other(e.to_string()))?;
 
         Ok(LapinConnection {
             channel,
-            queue_name : queue_name.to_string()
+            queue_name: queue_name.to_string(),
         })
     }
 }
 
-pub async fn get_queue_connection(is_test : bool) -> Result<LapinConnection, RelayerError> {
+pub async fn get_queue_connection(is_test: bool) -> Result<LapinConnection, RelayerError> {
     let queue_connection = LapinConnection::new(is_test).await?;
-    Ok(queue_connection)    
+    Ok(queue_connection)
 }
 // move to includer
 
@@ -113,26 +112,24 @@ mod tests {
 
     use crate::{
         includer::{self, Includer},
+        subscriber::Deposit,
         utils::get_dst_contract_addr,
     };
     // move to integration tests this one check what the convention is
     use super::*;
     #[tokio::test]
+
     async fn test_publish_and_consume() {
+        dotenv::dotenv().ok();
+
         const ADDRESS_PATH: &str = "../project_eth/data/deployments.json";
-        unsafe {
-            std::env::set_var(
-                "PRIVATE_KEY",
-                "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
-            );
-        }
         let mut con = get_queue_connection(true).await.unwrap();
         let test_deposit = Deposit {
             sender: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
                 .parse()
                 .unwrap(),
             amount: 42,
-       };
+        };
         let test_item = serde_json::to_vec(&test_deposit).unwrap();
         let resp = con.publish(&test_item).await;
         assert!(resp.is_ok());
@@ -155,20 +152,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_publish_and_consume_without_includer() {
-        const ADDRESS_PATH: &str = "../project_eth/data/deployments.json";
-        unsafe {
-            std::env::set_var(
-                "PRIVATE_KEY",
-                "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
-            );
-        }
+        dotenv::dotenv().ok();
         let mut con = get_queue_connection(true).await.unwrap();
         let test_deposit = Deposit {
             sender: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
                 .parse()
                 .unwrap(),
             amount: 42,
-       };
+        };
         let test_item = serde_json::to_vec(&test_deposit).unwrap();
         let resp = con.publish(&test_item).await;
         assert!(resp.is_ok());
@@ -178,10 +169,8 @@ mod tests {
         let delivery = res.unwrap();
         let deposit = serde_json::from_slice::<Deposit>(&delivery.data).unwrap();
         assert_eq!(deposit, test_deposit);
-
     }
 }
-
 
 // mod tests {
 //     use super::*;
