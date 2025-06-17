@@ -28,4 +28,4 @@ jobs:
     if: github.ref == 'refs/heads/main'
     steps:
       - name: Deploy step placeholder
-        run: echo "🚀 Deploying now because tests passed!"
+        run: echo "Tests passed, deploying..."
